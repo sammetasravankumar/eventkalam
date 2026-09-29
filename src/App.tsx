@@ -42,7 +42,7 @@ import { supabase, type UserProfile, type EventRow, type Registration } from '@/
 type View = 'home' | 'events' | 'eventDetail' | 'about' | 'contact' | 'login' | 'dashboard' | 'admin' | 'adminLogin';
 
 const asset = (folder: string, name: string) => `/assets/images/${folder}/${name}`;
-const logo = asset('logo', 'WhatsApp_Image_2026-09-28_at_10.35.52_AM_(1).jpeg');
+const logo = asset('logo', 'WhatsApp_Image_2026-09-28_at_11.29.33_AM.jpeg');
 const heroImage = asset('backgrounds', 'WhatsApp_Image_2026-09-28_at_10.35.52_AM.jpeg');
 const fallbackImages = [
   asset('events', 'WhatsApp_Image_2026-09-28_at_11.29.33_AM.jpeg'),
@@ -109,48 +109,60 @@ function App() {
     return () => window.clearTimeout(timer);
   }, [toast]);
 
-  // Auth state
-  useEffect(() => {
-    let mounted = true;
-    supabase.auth.getSession().then(({ data }) => {
-      if (!mounted) return;
-      if (data.session) {
-        loadProfile(data.session.user.id);
-      } else {
-        setAuthLoading(false);
-      }
-    });
-    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
-      (async () => {
-        if (session) {
-          await loadProfile(session.user.id);
-        } else {
-          setProfile(null);
-          setAuthLoading(false);
-        }
-      })();
-    });
-    return () => {
-      mounted = false;
-      authListener.subscription.unsubscribe();
-    };
-  }, []);
-
-  const loadProfile = async (userId: string) => {
+  const loadProfile = useCallback(async (userId: string): Promise<UserProfile | null> => {
     const { data, error } = await supabase
       .from('users')
       .select('*')
       .eq('user_id', userId)
       .maybeSingle();
     if (error) {
-      setAuthLoading(false);
-      return;
+      console.error('EventKalam: Profile load error:', error.message);
+      return null;
     }
     if (data) {
       setProfile(data as UserProfile);
+      setAuthLoading(false);
+      return data as UserProfile;
     }
     setAuthLoading(false);
-  };
+    return null;
+  }, []);
+
+  // Auth state — single source of truth for profile loading and routing
+  useEffect(() => {
+    let mounted = true;
+    // On initial load, restore session from storage (handles page refresh)
+    supabase.auth.getSession().then(async ({ data }) => {
+      if (!mounted) return;
+      if (data.session) {
+        let fetched = await loadProfile(data.session.user.id);
+        if (!fetched) {
+          await new Promise(r => setTimeout(r, 800));
+          fetched = await loadProfile(data.session.user.id);
+        }
+        if (!fetched && mounted) setAuthLoading(false);
+      } else {
+        setAuthLoading(false);
+      }
+    });
+    // Listen for auth changes — but only act on SIGNED_IN / SIGNED_OUT, not transitional events
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!mounted) return;
+      if (event === 'SIGNED_IN' && session) {
+        setAuthLoading(true);
+        loadProfile(session.user.id);
+      } else if (event === 'SIGNED_OUT') {
+        setProfile(null);
+        setAuthLoading(false);
+      }
+      // Ignore TOKEN_REFRESHED, INITIAL_SESSION, and other intermediate events
+      // to avoid wiping profile/loading state during transitions
+    });
+    return () => {
+      mounted = false;
+      authListener.subscription.unsubscribe();
+    };
+  }, [loadProfile]);
 
   // Load published events
   const loadEvents = useCallback(async () => {
@@ -161,6 +173,7 @@ function App() {
       .eq('status', 'published')
       .order('date', { ascending: true });
     if (error) {
+      console.error('EventKalam: Failed to load events:', error.message);
       setEvents([]);
     } else {
       setEvents((data || []) as EventRow[]);
@@ -184,8 +197,10 @@ function App() {
   };
 
   const handleSignOut = async () => {
+    setAuthLoading(true);
     await supabase.auth.signOut();
     setProfile(null);
+    setAuthLoading(false);
     setToast('You have been signed out.');
     go('home');
   };
@@ -200,6 +215,13 @@ function App() {
 
   const isAdmin = profile?.role === 'admin';
 
+  // Safety timeout: if authLoading stays true too long (e.g., both profile loads errored), release it
+  useEffect(() => {
+    if (!authLoading) return;
+    const timer = setTimeout(() => setAuthLoading(false), 6000);
+    return () => clearTimeout(timer);
+  }, [authLoading]);
+
   return (
     <div className="app-shell">
       <header className="site-header">
@@ -212,8 +234,8 @@ function App() {
             <NavItem label="Home" active={view === 'home'} onClick={() => go('home')} />
             <NavItem label="Events" active={view === 'events' || view === 'eventDetail'} onClick={() => go('events')} />
             <NavItem label="About" active={view === 'about'} onClick={() => go('about')} />
-            <NavItem label="My dashboard" active={view === 'dashboard'} onClick={() => profile ? go('dashboard') : go('login')} />
-            {isAdmin && <NavItem label="Admin" active={view === 'admin'} onClick={() => go('admin')} />}
+            <NavItem label={isAdmin ? 'Admin Dashboard' : 'My Dashboard'} active={view === 'dashboard' || (isAdmin && view === 'admin')} onClick={() => profile ? (isAdmin ? go('admin') : go('dashboard')) : go('login')} />
+            {isAdmin && <NavItem label="My Profile" active={view === 'dashboard'} onClick={() => go('dashboard')} />}
             <NavItem label="Contact" active={view === 'contact'} onClick={() => go('contact')} />
           </nav>
           <div className="nav-actions">
@@ -252,11 +274,37 @@ function App() {
         )}
         {view === 'about' && <AboutPage go={go} />}
         {view === 'contact' && <ContactPage setToast={setToast} />}
-        {view === 'login' && <LoginPage onLogin={() => { setToast('Welcome back to EventKalam.'); }} go={go} />}
-        {view === 'dashboard' && profile && <Dashboard profile={profile} events={events} go={go} onAction={() => setRefreshKey(k => k + 1)} setToast={setToast} />}
-        {view === 'dashboard' && !profile && <div className="page-content page-width"><div className="empty-state"><AlertCircle size={30} /><h3>Please sign in to view your dashboard.</h3><button className="button button-primary" onClick={() => go('login')}>Sign in</button></div></div>}
-        {view === 'admin' && isAdmin && <AdminPage profile={profile} go={go} setToast={setToast} onAction={() => setRefreshKey(k => k + 1)} />}
-        {view === 'admin' && !isAdmin && <div className="page-content page-width"><div className="empty-state"><ShieldCheck size={30} /><h3>Admin access required.</h3><button className="button button-primary" onClick={() => go('home')}>Back home</button></div></div>}
+        {view === 'login' && <LoginPage onLogin={async () => {
+          setAuthLoading(true);
+          setToast('Welcome back to EventKalam.');
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user) {
+            let fetchedProfile = await loadProfile(user.id);
+            if (!fetchedProfile) {
+              await new Promise(r => setTimeout(r, 1500));
+              fetchedProfile = await loadProfile(user.id);
+            }
+            if (fetchedProfile) {
+              setAuthLoading(false);
+              if (fetchedProfile.role === 'admin') {
+                go('admin');
+              } else {
+                go('dashboard');
+              }
+            } else {
+              setToast('Profile not found. Please try signing in again.');
+              setAuthLoading(false);
+            }
+          } else {
+            setAuthLoading(false);
+          }
+        }} go={go} />}
+        {view === 'dashboard' && authLoading && <div className="page-content page-width"><div className="empty-state"><Loader2 size={30} className="spin" /><h3>Loading your dashboard...</h3></div></div>}
+        {view === 'dashboard' && !authLoading && profile && <Dashboard profile={profile} events={events} go={go} onAction={() => setRefreshKey(k => k + 1)} setToast={setToast} />}
+        {view === 'dashboard' && !authLoading && !profile && <div className="page-content page-width"><div className="empty-state"><AlertCircle size={30} /><h3>Please sign in to view your dashboard.</h3><button className="button button-primary" onClick={() => go('login')}>Sign in</button></div></div>}
+        {view === 'admin' && authLoading && <div className="page-content page-width"><div className="empty-state"><Loader2 size={30} className="spin" /><h3>Loading admin dashboard...</h3></div></div>}
+        {view === 'admin' && !authLoading && isAdmin && profile && <AdminPage profile={profile} go={go} setToast={setToast} onAction={() => setRefreshKey(k => k + 1)} />}
+        {view === 'admin' && !authLoading && !isAdmin && <div className="page-content page-width"><div className="empty-state"><ShieldCheck size={30} /><h3>Admin access required.</h3><button className="button button-primary" onClick={() => go('home')}>Back home</button></div></div>}
       </main>
 
       <footer className="site-footer">
@@ -586,6 +634,7 @@ function ContactPage({ setToast }: { setToast: (value: string) => void }) {
 // LOGIN / SIGNUP
 // ============================================================
 function LoginPage({ onLogin, go }: { onLogin: () => void; go: (view: View) => void }) {
+  const [authMode, setAuthMode] = useState<'user' | 'admin'>('user');
   const [mode, setMode] = useState<'login' | 'signup'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -594,6 +643,17 @@ function LoginPage({ onLogin, go }: { onLogin: () => void; go: (view: View) => v
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [resetSent, setResetSent] = useState(false);
+
+  const handleResetPassword = async () => {
+    if (!email) { setError('Enter your email address first.'); return; }
+    setLoading(true);
+    const { error: resetError } = await supabase.auth.resetPasswordForEmail(email);
+    setLoading(false);
+    if (resetError) { setError('Could not send reset email.'); return; }
+    setResetSent(true);
+    setError('');
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -601,7 +661,7 @@ function LoginPage({ onLogin, go }: { onLogin: () => void; go: (view: View) => v
     if (password.length < 6) { setError('Password must be at least 6 characters.'); return; }
     setLoading(true);
     try {
-      if (mode === 'signup') {
+      if (mode === 'signup' && authMode === 'user') {
         const { data, error: signUpError } = await supabase.auth.signUp({
           email,
           password,
@@ -610,17 +670,22 @@ function LoginPage({ onLogin, go }: { onLogin: () => void; go: (view: View) => v
         if (signUpError) throw signUpError;
         if (data.user) {
           onLogin();
-          go('dashboard');
         }
       } else {
         const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
         if (signInError) throw signInError;
         onLogin();
-        go('dashboard');
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Authentication failed.';
-      setError(msg.includes('Invalid login') || msg.includes('Invalid credentials') ? 'Invalid email or password.' : msg);
+      const friendly = msg.includes('Invalid login') || msg.includes('Invalid credentials')
+        ? 'Invalid email or password.'
+        : msg.includes('already registered') || msg.includes('already been registered')
+        ? 'This email is already registered. Try signing in instead.'
+        : msg.includes('Database error saving new user')
+        ? 'Something went wrong creating your account. Please try again.'
+        : msg;
+      setError(friendly);
     } finally {
       setLoading(false);
     }
@@ -635,28 +700,42 @@ function LoginPage({ onLogin, go }: { onLogin: () => void; go: (view: View) => v
       <div className="auth-card">
         <div className="auth-card-head">
           <p className="eyebrow">Welcome to EventKalam</p>
-          <h2>{mode === 'login' ? 'Good to see you.' : 'Make a little room.'}</h2>
-          <p>{mode === 'login' ? 'Sign in to keep exploring.' : 'Create your free student account.'}</p>
+          <h2>{authMode === 'admin' ? 'Admin access' : mode === 'login' ? 'Good to see you.' : 'Make a little room.'}</h2>
+          <p>{authMode === 'admin' ? 'Sign in to manage events and registrations.' : mode === 'login' ? 'Sign in to keep exploring.' : 'Create your free student account.'}</p>
         </div>
-        <div className="auth-tabs">
-          <button className={mode === 'login' ? 'active' : ''} onClick={() => { setMode('login'); setError(''); }}>Sign in</button>
-          <button className={mode === 'signup' ? 'active' : ''} onClick={() => { setMode('signup'); setError(''); }}>Create account</button>
+        <div className="auth-mode-switch">
+          <button className={authMode === 'user' ? 'active' : ''} onClick={() => { setAuthMode('user'); setMode('login'); setError(''); setResetSent(false); }}>User Login</button>
+          <button className={authMode === 'admin' ? 'active' : ''} onClick={() => { setAuthMode('admin'); setMode('login'); setError(''); setResetSent(false); }}><ShieldCheck size={14} /> Admin Login</button>
         </div>
+        {authMode === 'user' && (
+          <div className="auth-tabs">
+            <button className={mode === 'login' ? 'active' : ''} onClick={() => { setMode('login'); setError(''); setResetSent(false); }}>Sign in</button>
+            <button className={mode === 'signup' ? 'active' : ''} onClick={() => { setMode('signup'); setError(''); setResetSent(false); }}>Create account</button>
+          </div>
+        )}
         {error && <div className="auth-error"><AlertCircle size={16} /> {error}</div>}
+        {resetSent && <div className="auth-success"><Check size={16} /> Password reset email sent. Check your inbox.</div>}
         <form onSubmit={handleSubmit}>
-          {mode === 'signup' && <label>Full name<input required value={name} onChange={(e) => setName(e.target.value)} placeholder="Your full name" /></label>}
+          {mode === 'signup' && authMode === 'user' && <label>Full name<input required value={name} onChange={(e) => setName(e.target.value)} placeholder="Your full name" /></label>}
           <label>Email address<input required type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" /></label>
-          {mode === 'signup' && <label>Phone number<input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Your phone number" /></label>}
+          {mode === 'signup' && authMode === 'user' && <label>Phone number<input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Your phone number" /></label>}
           <label>Password
             <div className="password-wrap">
               <input required type={showPassword ? 'text' : 'password'} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="At least 6 characters" />
               <button type="button" className="password-toggle" onClick={() => setShowPassword(!showPassword)}>{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button>
             </div>
           </label>
-          {mode === 'login' && <div className="form-options"><label className="checkbox"><input type="checkbox" /> Remember me</label><button type="button">Forgot password?</button></div>}
-          <button className="button button-primary auth-submit" type="submit" disabled={loading}>{loading ? <Loader2 size={16} className="spin" /> : mode === 'login' ? <>Sign in <ArrowRight size={16} /></> : <>Create account <ArrowRight size={16} /></>}</button>
+          {mode === 'login' && authMode === 'user' && (
+            <div className="form-options">
+              <label className="checkbox"><input type="checkbox" /> Remember me</label>
+              <button type="button" onClick={handleResetPassword} disabled={loading}>Forgot password?</button>
+            </div>
+          )}
+          <button className="button button-primary auth-submit" type="submit" disabled={loading}>
+            {loading ? <Loader2 size={16} className="spin" /> : authMode === 'admin' ? <>Admin sign in <ArrowRight size={16} /></> : mode === 'login' ? <>Sign in <ArrowRight size={16} /></> : <>Create account <ArrowRight size={16} /></>}
+          </button>
         </form>
-        <p className="auth-note"><ShieldCheck size={15} /> Your information stays private and secure.</p>
+        <p className="auth-note"><ShieldCheck size={15} /> {authMode === 'admin' ? 'Admin access is restricted to authorized accounts.' : 'Your information stays private and secure.'}</p>
       </div>
     </section>
   );
@@ -686,8 +765,9 @@ function Dashboard({ profile, events, go, onAction, setToast }: {
     return regs;
   }, [events, profile.user_id]);
 
-  const upcomingRegs = myRegistrations.filter((r) => new Date(r.event.date) >= new Date());
-  const pastRegs = myRegistrations.filter((r) => new Date(r.event.date) < new Date());
+  const upcomingRegs = myRegistrations.filter((r) => new Date(r.event.date) >= new Date() && r.reg.registration_status !== 'attended');
+  const pastRegs = myRegistrations.filter((r) => r.reg.registration_status === 'attended');
+  const attendedCount = myRegistrations.filter((r) => r.reg.registration_status === 'attended').length;
 
   const handleCancelReg = async (eventId: string) => {
     const { data, error } = await supabase.rpc('cancel_registration', { p_event_id: eventId });
@@ -721,7 +801,7 @@ function Dashboard({ profile, events, go, onAction, setToast }: {
       <div className="dashboard-stats">
         <div><span>Total registrations</span><strong>{myRegistrations.length}</strong><small>Keep exploring</small></div>
         <div><span>Upcoming events</span><strong>{upcomingRegs.length}</strong><small>Ready when you are</small></div>
-        <div><span>Events attended</span><strong>{pastRegs.length}</strong><small>Your story so far</small></div>
+        <div><span>Events attended</span><strong>{attendedCount}</strong><small>Your story so far</small></div>
       </div>
 
       <div className="dashboard-content">
@@ -743,10 +823,12 @@ function Dashboard({ profile, events, go, onAction, setToast }: {
                   <span><CalendarDays size={14} /> {formatDate(event.date)} <span className="dot-separator" /> <MapPin size={14} /> {event.venue}</span>
                   <span className="reg-id-line">ID: {reg.registration_id.slice(0, 8).toUpperCase()} · {reg.seats} seat(s)</span>
                 </div>
-                {new Date(event.date) >= new Date() ? (
+                {reg.registration_status === 'attended' ? (
+                  <span className="attended-badge"><Check size={14} /> Attended</span>
+                ) : new Date(event.date) >= new Date() ? (
                   <button className="button button-danger-sm" onClick={() => handleCancelReg(event.event_id)}>Cancel</button>
                 ) : (
-                  <span className="attended-badge"><Check size={14} /> Attended</span>
+                  <span className="registered-badge">Registered</span>
                 )}
               </div>
             ))
@@ -815,7 +897,7 @@ function AdminPage({ profile, go, setToast, onAction }: {
     onAction();
   };
 
-  const handleStatusChange = async (eventId: string, status: string) => {
+  const handleStatusChange = async (eventId: string, status: 'draft' | 'published' | 'cancelled' | 'completed') => {
     const { error } = await supabase.from('events').update({ status }).eq('event_id', eventId);
     if (error) { setToast('Could not update status.'); return; }
     setToast(`Event ${status}.`);
@@ -853,7 +935,7 @@ function AdminPage({ profile, go, setToast, onAction }: {
       )}
 
       {viewingEvent && (
-        <AdminRegistrationsModal event={viewingEvent} onClose={() => setViewingEvent(null)} />
+        <AdminRegistrationsModal event={viewingEvent} onClose={() => setViewingEvent(null)} onAction={() => { loadAdminEvents(); onAction(); }} setToast={setToast} />
       )}
 
       <div className="admin-events-list">
@@ -945,7 +1027,7 @@ function AdminEventForm({ event, userId, onClose, onSaved, setToast }: {
             <label>Category<select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
               <option>Workshop</option><option>Seminar</option><option>Community</option><option>Career</option><option>Networking</option><option>Cultural</option><option>Hackathon</option>
             </select></label>
-            <label>Status<select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
+            <label>Status<select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as 'draft' | 'published' | 'cancelled' | 'completed' })}>
               <option value="draft">Draft</option><option value="published">Published</option><option value="cancelled">Cancelled</option><option value="completed">Completed</option>
             </select></label>
           </div>
@@ -977,20 +1059,63 @@ function AdminEventForm({ event, userId, onClose, onSaved, setToast }: {
   );
 }
 
-function AdminRegistrationsModal({ event, onClose }: { event: EventRow; onClose: () => void }) {
-  const activeRegs = event.registrations.filter((r) => r.registration_status === 'registered');
+function AdminRegistrationsModal({ event, onClose, onAction, setToast }: { event: EventRow; onClose: () => void; onAction: () => void; setToast: (value: string) => void }) {
+  const [localEvent, setLocalEvent] = useState<EventRow>(event);
+  const [updating, setUpdating] = useState<string | null>(null);
+
+  const activeRegs = localEvent.registrations.filter((r) => r.registration_status !== 'cancelled');
+
+  const toggleAttendance = async (reg: Registration) => {
+    setUpdating(reg.registration_id);
+    const newStatus: 'registered' | 'attended' = reg.registration_status === 'attended' ? 'registered' : 'attended';
+    const updatedRegs = localEvent.registrations.map((r) =>
+      r.registration_id === reg.registration_id ? { ...r, registration_status: newStatus } : r
+    );
+    const { error } = await supabase
+      .from('events')
+      .update({ registrations: updatedRegs })
+      .eq('event_id', localEvent.event_id);
+    setUpdating(null);
+    if (error) { setToast('Could not update attendance.'); return; }
+    setLocalEvent({ ...localEvent, registrations: updatedRegs });
+    setToast(`Marked as ${newStatus}.`);
+    onAction();
+  };
+
+  const markAllPresent = async () => {
+    const updatedRegs = localEvent.registrations.map((r) =>
+      r.registration_status === 'registered' ? { ...r, registration_status: 'attended' as const } : r
+    );
+    const { error } = await supabase
+      .from('events')
+      .update({ registrations: updatedRegs })
+      .eq('event_id', localEvent.event_id);
+    if (error) { setToast('Could not update attendance.'); return; }
+    setLocalEvent({ ...localEvent, registrations: updatedRegs });
+    setToast('All registered users marked as attended.');
+    onAction();
+  };
+
+  const attendedCount = activeRegs.filter((r) => r.registration_status === 'attended').length;
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-content" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
-          <div><h2>Registrations</h2><p>{event.title}</p></div>
+          <div><h2>Registrations</h2><p>{localEvent.title}</p></div>
           <button className="icon-btn" onClick={onClose}><X size={18} /></button>
         </div>
         <div className="modal-stats">
           <span>Total: <strong>{activeRegs.length}</strong></span>
-          <span>Capacity: <strong>{event.capacity}</strong></span>
-          <span>Available: <strong>{availableSeats(event)}</strong></span>
+          <span>Capacity: <strong>{localEvent.capacity}</strong></span>
+          <span>Available: <strong>{availableSeats(localEvent)}</strong></span>
+          <span>Attended: <strong>{attendedCount}</strong></span>
         </div>
+        {activeRegs.length > 0 && activeRegs.some((r) => r.registration_status === 'registered') && (
+          <button className="button button-ghost" style={{ marginBottom: 12, width: 'fit-content' }} onClick={markAllPresent}>
+            <Check size={15} /> Mark all present
+          </button>
+        )}
         {activeRegs.length === 0 ? (
           <div className="empty-state" style={{ margin: '20px 0' }}><Users size={24} /><h3>No registrations yet.</h3></div>
         ) : (
@@ -1003,7 +1128,17 @@ function AdminRegistrationsModal({ event, onClose }: { event: EventRow; onClose:
                   <span>{reg.user_email}</span>
                   <span>{reg.phone || 'No phone'} · {reg.seats} seat(s)</span>
                 </div>
-                <span className="reg-id-tag">{reg.registration_id.slice(0, 8).toUpperCase()}</span>
+                <div className="reg-actions">
+                  <span className={`reg-id-tag ${reg.registration_status}`}>{reg.registration_status}</span>
+                  <span className="reg-id-tag">{reg.registration_id.slice(0, 8).toUpperCase()}</span>
+                  <button
+                    className={`button button-sm ${reg.registration_status === 'attended' ? 'button-registered' : 'button-outline'}`}
+                    onClick={() => toggleAttendance(reg)}
+                    disabled={updating === reg.registration_id}
+                  >
+                    {updating === reg.registration_id ? <Loader2 size={14} className="spin" /> : reg.registration_status === 'attended' ? <><Check size={14} /> Attended</> : 'Mark attended'}
+                  </button>
+                </div>
               </div>
             ))}
           </div>

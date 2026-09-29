@@ -35,7 +35,7 @@ export type Registration = {
   seats: number;
   total_amount: number;
   registration_date: string;
-  registration_status: 'registered' | 'cancelled';
+  registration_status: 'registered' | 'cancelled' | 'attended';
 };
 
 export type EventRow = {
