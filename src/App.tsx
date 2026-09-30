@@ -47,7 +47,7 @@ const asset = (folder: string, name: string) => `/assets/images/${folder}/${name
 const logo = asset('logo', 'WhatsApp_Image_2026-09-28_at_11.29.33_AM.jpeg');
 const heroImage = asset('backgrounds', 'WhatsApp_Image_2026-09-28_at_10.35.52_AM.jpeg');
 const fallbackImages = [
-  asset('events', 'WhatsApp_Image_2026-09-28_at_11.29.33_AM.jpeg'),
+  asset('events', 'WhatsApp_Image_2026-09-30_at_13.41.59.jpeg'),
   asset('events', 'WhatsApp_Image_2026-09-28_at_10.40.16_AM_(1).jpeg'),
   asset('events', 'WhatsApp_Image_2026-09-28_at_10.45.09_AM.jpeg'),
 ];
