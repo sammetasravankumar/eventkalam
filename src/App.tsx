@@ -109,6 +109,7 @@ function App() {
     return () => window.clearTimeout(timer);
   }, [toast]);
 
+  // Fetch profile from DB. Sets profile state on success. Caller controls authLoading.
   const loadProfile = useCallback(async (userId: string): Promise<UserProfile | null> => {
     const { data, error } = await supabase
       .from('users')
@@ -121,48 +122,50 @@ function App() {
     }
     if (data) {
       setProfile(data as UserProfile);
-      setAuthLoading(false);
       return data as UserProfile;
     }
-    setAuthLoading(false);
     return null;
   }, []);
 
-  // Auth state — single source of truth for profile loading and routing
+  // Load profile with retries — needed after signup when the DB trigger may not have run yet
+  const loadProfileWithRetry = useCallback(async (userId: string, maxAttempts = 5): Promise<UserProfile | null> => {
+    const delays = [0, 600, 1200, 2000, 3000];
+    for (let i = 0; i < maxAttempts; i++) {
+      if (delays[i] > 0) await new Promise(r => setTimeout(r, delays[i]));
+      const result = await loadProfile(userId);
+      if (result) return result;
+    }
+    return null;
+  }, [loadProfile]);
+
+  // Auth state — single source of truth
   useEffect(() => {
     let mounted = true;
-    // On initial load, restore session from storage (handles page refresh)
+    // Restore session on page load/refresh
     supabase.auth.getSession().then(async ({ data }) => {
       if (!mounted) return;
       if (data.session) {
-        let fetched = await loadProfile(data.session.user.id);
-        if (!fetched) {
-          await new Promise(r => setTimeout(r, 800));
-          fetched = await loadProfile(data.session.user.id);
-        }
-        if (!fetched && mounted) setAuthLoading(false);
+        const fetched = await loadProfileWithRetry(data.session.user.id);
+        if (mounted) setAuthLoading(false);
+        if (!fetched) console.warn('EventKalam: Profile not found after session restore.');
       } else {
         setAuthLoading(false);
       }
     });
-    // Listen for auth changes — but only act on SIGNED_IN / SIGNED_OUT, not transitional events
+    // Only respond to definitive auth events
     const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
       if (!mounted) return;
-      if (event === 'SIGNED_IN' && session) {
-        setAuthLoading(true);
-        loadProfile(session.user.id);
-      } else if (event === 'SIGNED_OUT') {
+      if (event === 'SIGNED_OUT') {
         setProfile(null);
         setAuthLoading(false);
       }
-      // Ignore TOKEN_REFRESHED, INITIAL_SESSION, and other intermediate events
-      // to avoid wiping profile/loading state during transitions
+      // SIGNED_IN is handled by the onLogin callback in LoginPage to avoid double-loading
     });
     return () => {
       mounted = false;
       authListener.subscription.unsubscribe();
     };
-  }, [loadProfile]);
+  }, [loadProfileWithRetry]);
 
   // Load published events
   const loadEvents = useCallback(async () => {
@@ -274,26 +277,23 @@ function App() {
         )}
         {view === 'about' && <AboutPage go={go} />}
         {view === 'contact' && <ContactPage setToast={setToast} />}
-        {view === 'login' && <LoginPage onLogin={async () => {
+        {view === 'login' && <LoginPage onLogin={async (isNewUser?: boolean) => {
           setAuthLoading(true);
-          setToast('Welcome back to EventKalam.');
           const { data: { user } } = await supabase.auth.getUser();
           if (user) {
-            let fetchedProfile = await loadProfile(user.id);
-            if (!fetchedProfile) {
-              await new Promise(r => setTimeout(r, 1500));
-              fetchedProfile = await loadProfile(user.id);
-            }
+            // New users need more retries — DB trigger may not have run yet
+            const fetchedProfile = await loadProfileWithRetry(user.id, isNewUser ? 5 : 3);
+            setAuthLoading(false);
             if (fetchedProfile) {
-              setAuthLoading(false);
+              setToast(isNewUser ? 'Welcome to EventKalam!' : 'Welcome back to EventKalam.');
               if (fetchedProfile.role === 'admin') {
                 go('admin');
               } else {
                 go('dashboard');
               }
             } else {
-              setToast('Profile not found. Please try signing in again.');
-              setAuthLoading(false);
+              setToast('Account created. Please sign in.');
+              // Profile not ready yet — stay on login so user can sign in manually
             }
           } else {
             setAuthLoading(false);
@@ -633,7 +633,7 @@ function ContactPage({ setToast }: { setToast: (value: string) => void }) {
 // ============================================================
 // LOGIN / SIGNUP
 // ============================================================
-function LoginPage({ onLogin, go }: { onLogin: () => void; go: (view: View) => void }) {
+function LoginPage({ onLogin, go }: { onLogin: (isNewUser?: boolean) => void; go: (view: View) => void }) {
   const [authMode, setAuthMode] = useState<'user' | 'admin'>('user');
   const [mode, setMode] = useState<'login' | 'signup'>('login');
   const [email, setEmail] = useState('');
@@ -669,12 +669,12 @@ function LoginPage({ onLogin, go }: { onLogin: () => void; go: (view: View) => v
         });
         if (signUpError) throw signUpError;
         if (data.user) {
-          onLogin();
+          onLogin(true);
         }
       } else {
         const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
         if (signInError) throw signInError;
-        onLogin();
+        onLogin(false);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Authentication failed.';
