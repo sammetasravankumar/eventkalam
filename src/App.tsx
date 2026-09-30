@@ -468,9 +468,11 @@ function EventDetailPage({ event, profile, go, goLogin, onRegistered, setToast }
   const seatsLeft = availableSeats(event);
   const registered = isRegistered(event, profile?.user_id || null);
   const myReg = event.registrations.find((r) => r.user_id === profile?.user_id && r.registration_status === 'registered');
+  const completed = isEventCompleted(event);
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (completed) { setToast('This event has already been completed.'); return; }
     if (!profile) { goLogin(); return; }
     if (seats < 1) { setToast('Please select at least one seat.'); return; }
     if (seats > seatsLeft) { setToast(`Only ${seatsLeft} seats available.`); return; }
@@ -550,7 +552,16 @@ function EventDetailPage({ event, profile, go, goLogin, onRegistered, setToast }
         </div>
 
         <div className="event-detail-sidebar">
-          {confirmation ? (
+          {completed ? (
+            <div className="reg-sidebar-card">
+              <div style={{ textAlign: 'center', padding: '8px 0' }}>
+                <CheckCircle2 size={36} style={{ color: 'var(--muted)', margin: '0 auto 10px' }} />
+                <p style={{ color: 'var(--muted)', fontWeight: 700, fontSize: 13, margin: 0 }}>This event has been completed.</p>
+                <p style={{ color: 'var(--muted)', fontSize: 11, marginTop: 6 }}>Registration is no longer available.</p>
+              </div>
+              <button className="button button-outline" disabled style={{ opacity: 0.5, cursor: 'not-allowed' }}>Event Completed</button>
+            </div>
+          ) : confirmation ? (
             <div className="reg-confirmation">
               <div className="reg-confirm-icon"><Check size={32} /></div>
               <h3>Registration confirmed!</h3>
