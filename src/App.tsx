@@ -39,7 +39,7 @@ import {
 } from 'lucide-react';
 import { supabase, type UserProfile, type EventRow, type Registration } from '@/lib/supabase';
 
-type View = 'home' | 'events' | 'eventDetail' | 'about' | 'contact' | 'login' | 'dashboard' | 'admin' | 'adminLogin';
+type View = 'home' | 'events' | 'eventDetail' | 'about' | 'contact' | 'login' | 'dashboard' | 'admin' | 'adminLogin' | 'resetPassword';
 
 const asset = (folder: string, name: string) => `/assets/images/${folder}/${name}`;
 const logo = asset('logo', 'WhatsApp_Image_2026-09-28_at_11.29.33_AM.jpeg');
@@ -158,6 +158,10 @@ function App() {
       if (event === 'SIGNED_OUT') {
         setProfile(null);
         setAuthLoading(false);
+      } else if (event === 'PASSWORD_RECOVERY') {
+        // User clicked the reset link in the email — show the reset page
+        setAuthLoading(false);
+        setView('resetPassword');
       }
       // SIGNED_IN is handled by the onLogin callback in LoginPage to avoid double-loading
     });
@@ -305,6 +309,7 @@ function App() {
         {view === 'admin' && authLoading && <div className="page-content page-width"><div className="empty-state"><Loader2 size={30} className="spin" /><h3>Loading admin dashboard...</h3></div></div>}
         {view === 'admin' && !authLoading && isAdmin && profile && <AdminPage profile={profile} go={go} setToast={setToast} onAction={() => setRefreshKey(k => k + 1)} />}
         {view === 'admin' && !authLoading && !isAdmin && <div className="page-content page-width"><div className="empty-state"><ShieldCheck size={30} /><h3>Admin access required.</h3><button className="button button-primary" onClick={() => go('home')}>Back home</button></div></div>}
+        {view === 'resetPassword' && <ResetPasswordPage go={go} setToast={setToast} />}
       </main>
 
       <footer className="site-footer">
@@ -648,7 +653,9 @@ function LoginPage({ onLogin, go }: { onLogin: (isNewUser?: boolean) => void; go
   const handleResetPassword = async () => {
     if (!email) { setError('Enter your email address first.'); return; }
     setLoading(true);
-    const { error: resetError } = await supabase.auth.resetPasswordForEmail(email);
+    const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: window.location.origin,
+    });
     setLoading(false);
     if (resetError) { setError('Could not send reset email.'); return; }
     setResetSent(true);
@@ -736,6 +743,89 @@ function LoginPage({ onLogin, go }: { onLogin: (isNewUser?: boolean) => void; go
           </button>
         </form>
         <p className="auth-note"><ShieldCheck size={15} /> {authMode === 'admin' ? 'Admin access is restricted to authorized accounts.' : 'Your information stays private and secure.'}</p>
+      </div>
+    </section>
+  );
+}
+
+// ============================================================
+// RESET PASSWORD
+// ============================================================
+function ResetPasswordPage({ go, setToast }: { go: (view: View) => void; setToast: (value: string) => void }) {
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    if (password.length < 6) { setError('Password must be at least 6 characters.'); return; }
+    if (password !== confirmPassword) { setError('Passwords do not match.'); return; }
+    setLoading(true);
+    const { error: updateError } = await supabase.auth.updateUser({ password });
+    setLoading(false);
+    if (updateError) {
+      setError(updateError.message || 'Could not update password. The reset link may have expired.');
+      return;
+    }
+    setSuccess(true);
+    setToast('Password updated. You can now sign in with your new password.');
+  };
+
+  if (success) {
+    return (
+      <section className="auth-page">
+        <div className="auth-visual" style={{ backgroundImage: `linear-gradient(180deg, rgba(5,11,31,.08), rgba(5,11,31,.9)), url("${heroImage}")` }}>
+          <img src={logo} alt="EventKalam" />
+          <div><p className="eyebrow">A better place to begin</p><h1>There is more waiting for you.</h1><p>Keep your events, ideas and new beginnings in one place.</p></div>
+        </div>
+        <div className="auth-card">
+          <div className="auth-card-head">
+            <p className="eyebrow">Welcome to EventKalam</p>
+            <h2>Password updated.</h2>
+            <p>Your new password is ready. You can sign in now.</p>
+          </div>
+          <div className="auth-success" style={{ marginBottom: 16 }}><Check size={16} /> Your password has been updated successfully.</div>
+          <button className="button button-primary auth-submit" onClick={() => go('login')}>Sign in <ArrowRight size={16} /></button>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="auth-page">
+      <div className="auth-visual" style={{ backgroundImage: `linear-gradient(180deg, rgba(5,11,31,.08), rgba(5,11,31,.9)), url("${heroImage}")` }}>
+        <img src={logo} alt="EventKalam" />
+        <div><p className="eyebrow">A better place to begin</p><h1>There is more waiting for you.</h1><p>Keep your events, ideas and new beginnings in one place.</p></div>
+      </div>
+      <div className="auth-card">
+        <div className="auth-card-head">
+          <p className="eyebrow">Welcome to EventKalam</p>
+          <h2>Set a new password.</h2>
+          <p>Choose a strong password to secure your account.</p>
+        </div>
+        {error && <div className="auth-error"><AlertCircle size={16} /> {error}</div>}
+        <form onSubmit={handleSubmit}>
+          <label>New Password
+            <div className="password-wrap">
+              <input required type={showPassword ? 'text' : 'password'} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="At least 6 characters" />
+              <button type="button" className="password-toggle" onClick={() => setShowPassword(!showPassword)}>{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button>
+            </div>
+          </label>
+          <label>Confirm New Password
+            <div className="password-wrap">
+              <input required type={showPassword ? 'text' : 'password'} value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="Re-enter your password" />
+              <button type="button" className="password-toggle" onClick={() => setShowPassword(!showPassword)}>{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button>
+            </div>
+          </label>
+          <button className="button button-primary auth-submit" type="submit" disabled={loading}>
+            {loading ? <Loader2 size={16} className="spin" /> : <>Update password <ArrowRight size={16} /></>}
+          </button>
+        </form>
+        <p className="auth-note"><ShieldCheck size={15} /> Your password is securely encrypted and never shared.</p>
       </div>
     </section>
   );
