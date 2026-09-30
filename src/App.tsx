@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowRight,
   ArrowLeft,
@@ -36,6 +36,8 @@ import {
   Building2,
   Tag,
   IndianRupee,
+  Upload,
+  CheckCircle2,
 } from 'lucide-react';
 import { supabase, type UserProfile, type EventRow, type Registration } from '@/lib/supabase';
 
@@ -66,6 +68,17 @@ function formatDate(dateStr: string): string {
   if (!dateStr) return '';
   const d = new Date(dateStr);
   return d.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function isEventCompleted(event: EventRow): boolean {
+  if (!event.date) return false;
+  try {
+    const eventDate = new Date(event.date);
+    eventDate.setHours(23, 59, 59, 999);
+    return eventDate < new Date();
+  } catch {
+    return false;
+  }
 }
 
 function availableSeats(event: EventRow): number {
@@ -177,7 +190,7 @@ function App() {
     const { data, error } = await supabase
       .from('events')
       .select('*')
-      .eq('status', 'published')
+      .in('status', ['published', 'completed'])
       .order('date', { ascending: true });
     if (error) {
       console.error('EventKalam: Failed to load events:', error.message);
@@ -377,12 +390,19 @@ function EventCard({ event, onOpen }: { event: EventRow; onOpen: () => void }) {
   const seats = availableSeats(event);
   const percent = event.capacity > 0 ? Math.round((seats / event.capacity) * 100) : 0;
   const statusLabel = seats === 0 ? 'Sold out' : percent < 20 ? 'Filling fast' : 'Open';
+  const completed = isEventCompleted(event);
   return (
     <article className="event-card" onClick={onOpen} style={{ cursor: 'pointer' }}>
       <div className="event-image">
-        <img src={event.image_url || fallbackImages[0]} alt={event.title} loading="lazy" />
+        <img src={event.image_url || fallbackImages[0]} alt={event.title} loading="lazy" style={completed ? { filter: 'brightness(0.6)' } : undefined} />
+        {completed && (
+          <div className="event-completed-overlay">
+            <CheckCircle2 size={18} />
+            COMPLETED
+          </div>
+        )}
         <span className={`event-badge ${getTone(event.category)}`}>{event.category}</span>
-        <span className="event-status">{statusLabel}</span>
+        {!completed && <span className="event-status">{statusLabel}</span>}
       </div>
       <div className="event-body">
         <div className="event-meta">
@@ -1093,8 +1113,40 @@ function AdminEventForm({ event, userId, onClose, onSaved, setToast }: {
     status: event?.status || 'draft',
   });
   const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const imageOptions = fallbackImages;
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!fileInputRef.current) return;
+    fileInputRef.current.value = '';
+    if (!file) return;
+    const allowed = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+    if (!allowed.includes(file.type)) {
+      setUploadError('Only JPG, PNG, or WEBP images are allowed.');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setUploadError('Image must be smaller than 5 MB.');
+      return;
+    }
+    setUploadError('');
+    setUploading(true);
+    const ext = file.name.split('.').pop();
+    const path = `events/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+    const { error: upErr } = await supabase.storage.from('event-images').upload(path, file, { upsert: false });
+    if (upErr) {
+      setUploadError('Upload failed. Please try again.');
+      setUploading(false);
+      return;
+    }
+    const { data: urlData } = supabase.storage.from('event-images').getPublicUrl(path);
+    setForm((prev) => ({ ...prev, image_url: urlData.publicUrl }));
+    setUploading(false);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1154,7 +1206,30 @@ function AdminEventForm({ event, userId, onClose, onSaved, setToast }: {
                   <img src={img} alt="" />
                 </button>
               ))}
+              <button
+                type="button"
+                className="image-option image-upload-btn"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+                title="Upload image from computer"
+              >
+                {uploading ? <Loader2 size={20} className="spin" /> : <Upload size={20} />}
+                <span style={{ fontSize: 10, marginTop: 3 }}>{uploading ? 'Uploading…' : 'Upload'}</span>
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/jpeg,image/jpg,image/png,image/webp"
+                style={{ display: 'none' }}
+                onChange={handleImageUpload}
+              />
             </div>
+            {uploadError && <p style={{ color: '#ff5f5f', fontSize: 12, marginTop: 4 }}>{uploadError}</p>}
+            {form.image_url && !imageOptions.includes(form.image_url) && (
+              <div style={{ marginTop: 8 }}>
+                <img src={form.image_url} alt="Preview" style={{ height: 70, width: 100, objectFit: 'cover', borderRadius: 8, border: '2px solid var(--cyan)' }} />
+              </div>
+            )}
           </label>
           <button className="button button-primary" type="submit" disabled={saving}>{saving ? <Loader2 size={16} className="spin" /> : event ? 'Save changes' : 'Create event'}</button>
         </form>
