@@ -653,13 +653,27 @@ function LoginPage({ onLogin, go }: { onLogin: (isNewUser?: boolean) => void; go
   const handleResetPassword = async () => {
     if (!email) { setError('Enter your email address first.'); return; }
     setLoading(true);
-    const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: window.location.origin,
-    });
-    setLoading(false);
-    if (resetError) { setError('Could not send reset email.'); return; }
-    setResetSent(true);
-    setError('');
+    try {
+      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-password-reset`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email, redirect_to: window.location.origin }),
+      });
+      const data = await response.json();
+      setLoading(false);
+      if (!response.ok || data.error) {
+        setError(data.error || 'Could not send reset email.');
+        return;
+      }
+      setResetSent(true);
+      setError('');
+    } catch {
+      setLoading(false);
+      setError('Could not send reset email. Please try again.');
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
