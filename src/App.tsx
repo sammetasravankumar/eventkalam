@@ -81,6 +81,35 @@ function isEventCompleted(event: EventRow): boolean {
   }
 }
 
+function eventStartTimestamp(event: EventRow): number {
+  const date = new Date(`${event.date}T00:00:00`);
+  const startTime = event.time.match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)/i);
+  if (!startTime) return date.getTime();
+  let hours = Number(startTime[1]) % 12;
+  if (startTime[3].toUpperCase() === 'PM') hours += 12;
+  date.setHours(hours, Number(startTime[2] || 0), 0, 0);
+  return date.getTime();
+}
+
+function eventSortTimestamp(event: EventRow): number {
+  return eventStartTimestamp(event);
+}
+
+function compareEvents(a: EventRow, b: EventRow): number {
+  const aTime = eventSortTimestamp(a);
+  const bTime = eventSortTimestamp(b);
+  const aCompleted = isEventCompleted(a);
+  const bCompleted = isEventCompleted(b);
+  if (aCompleted !== bCompleted) return aCompleted ? 1 : -1;
+  if (aCompleted && bCompleted) return bTime - aTime;
+
+  const today = new Date().toISOString().slice(0, 10);
+  const aToday = a.date === today;
+  const bToday = b.date === today;
+  if (aToday !== bToday) return aToday ? 1 : -1;
+  return aTime - bTime;
+}
+
 function availableSeats(event: EventRow): number {
   return Math.max(event.capacity - event.registered_count, 0);
 }
@@ -190,13 +219,12 @@ function App() {
     const { data, error } = await supabase
       .from('events')
       .select('*')
-      .in('status', ['published', 'completed'])
-      .order('date', { ascending: true });
+      .in('status', ['published', 'completed']);
     if (error) {
       console.error('EventKalam: Failed to load events:', error.message);
       setEvents([]);
     } else {
-      setEvents((data || []) as EventRow[]);
+      setEvents(((data || []) as EventRow[]).sort(compareEvents));
     }
     setEventsLoading(false);
   }, []);
@@ -346,7 +374,7 @@ function NavItem({ label, active, onClick }: { label: string; active: boolean; o
 // HOME
 // ============================================================
 function Home({ go, openEvent, events, loading, profile }: { go: (view: View) => void; openEvent: (id: string) => void; events: EventRow[]; loading: boolean; profile: UserProfile | null }) {
-  const upcoming = events.slice(0, 3);
+  const upcoming = events.filter((event) => !isEventCompleted(event)).slice(0, 3);
   return <>
     <section className="hero-section">
       <div className="hero-bg" style={{ backgroundImage: `url("${heroImage}")` }} />
