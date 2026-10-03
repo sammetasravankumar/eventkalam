@@ -39,6 +39,15 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 import { supabase, type UserProfile, type EventRow, type Registration } from '@/lib/supabase';
+import {
+  sendWelcomeEmail,
+  sendRegistrationEmail,
+  sendCancelledEmails,
+  sendPostponedEmails,
+  sendNewEventEmails,
+  type EmailRecipient,
+  type EmailEventData,
+} from '@/lib/email';
 
 type View = 'home' | 'events' | 'eventDetail' | 'about' | 'contact' | 'login' | 'dashboard' | 'admin' | 'adminLogin' | 'resetPassword';
 
@@ -106,6 +115,26 @@ function compareEvents(a: EventRow, b: EventRow): number {
 
 function availableSeats(event: EventRow): number {
   return Math.max(event.capacity - event.registered_count, 0);
+}
+
+function registeredEmailRecipients(event: EventRow): EmailRecipient[] {
+  return event.registrations
+    .filter((r) => r.registration_status === 'registered' && r.user_email)
+    .map((r) => ({ email: r.user_email, name: r.user_name }));
+}
+
+function toEmailEventData(event: EventRow): EmailEventData {
+  return {
+    title: event.title,
+    date: event.date,
+    time: event.time,
+    venue: event.venue,
+    city: event.city,
+    description: event.description,
+    category: event.category,
+    image_url: event.image_url,
+    price: event.price,
+  };
 }
 
 function isRegistered(event: EventRow, userId: string | null): boolean {
@@ -620,8 +649,17 @@ function EventDetailPage({ event, profile, go, goLogin, onRegistered, setToast }
       registration_status: 'registered',
     };
     setConfirmation(newReg);
-    setToast('Registration confirmed!');
+    setToast('Registration confirmed! A confirmation email is on its way.');
     onRegistered();
+    sendRegistrationEmail(
+      { email: profile.email, name: profile.name },
+      toEmailEventData(event),
+      { registration_id: newReg.registration_id, seats: newReg.seats, total_amount: newReg.total_amount, registration_status: 'registered' }
+    ).then((res) => {
+      if (!res.success) {
+        setToast('Registration successful. We couldn\'t send the confirmation email right now.');
+      }
+    });
   };
 
   const handleCancel = async () => {
@@ -867,6 +905,9 @@ function LoginPage({ onLogin, go }: { onLogin: (isNewUser?: boolean) => void; go
         });
         if (signUpError) throw signUpError;
         if (data.user) {
+          sendWelcomeEmail({ email, name }).then((res) => {
+            if (!res.success) console.warn('EventKalam: Welcome email failed:', res.error);
+          });
           onLogin(true);
         }
       } else {
@@ -1184,6 +1225,21 @@ function AdminPage({ profile, go, setToast, onAction }: {
     const { error } = await supabase.from('events').update({ status }).eq('event_id', eventId);
     if (error) { setToast('Could not update status.'); return; }
     setToast(`Event ${status}.`);
+    if (status === 'cancelled') {
+      const event = adminEvents.find((e) => e.event_id === eventId);
+      if (event) {
+        const recipients = registeredEmailRecipients(event);
+        if (recipients.length > 0) {
+          sendCancelledEmails(recipients, toEmailEventData(event)).then((res) => {
+            if (res.success) {
+              setToast(`Event cancelled. ${recipients.length} cancellation email(s) sent.`);
+            } else {
+              console.warn('EventKalam: Cancellation emails failed:', res.error);
+            }
+          });
+        }
+      }
+    }
     loadAdminEvents();
     onAction();
   };
@@ -1342,9 +1398,40 @@ function AdminEventForm({ event, userId, onClose, onSaved, setToast }: {
     if (event) {
       const { error } = await supabase.from('events').update(payload).eq('event_id', event.event_id);
       if (error) { setToast('Could not save event.'); setSaving(false); return; }
+      // Detect postponement: date or time changed on an event with registrations
+      const dateChanged = event.date !== form.date;
+      const timeChanged = event.time !== `${startTime} - ${endTime}`;
+      if ((dateChanged || timeChanged) && event.registrations.some((r) => r.registration_status === 'registered')) {
+        const recipients = registeredEmailRecipients(event);
+        if (recipients.length > 0) {
+          const updatedEventData: EmailEventData = {
+            title: form.title, date: form.date, time: form.time, venue: form.venue, city: form.city,
+            description: form.description, category: form.category, image_url: form.image_url, price: Number(form.price),
+          };
+          sendPostponedEmails(recipients, updatedEventData, event.date, event.time).then((res) => {
+            if (!res.success) console.warn('EventKalam: Postponement emails failed:', res.error);
+          });
+        }
+      }
     } else {
       const { error } = await supabase.from('events').insert(payload);
       if (error) { setToast('Could not create event.'); setSaving(false); return; }
+      // Send new event notification if the event is published
+      if (form.status === 'published') {
+        const { data: allUsers } = await supabase.from('users').select('email, name');
+        if (allUsers && allUsers.length > 0) {
+          const recipients: EmailRecipient[] = allUsers
+            .filter((u) => u.email)
+            .map((u) => ({ email: u.email, name: u.name || '' }));
+          const newEventData: EmailEventData = {
+            title: form.title, date: form.date, time: form.time, venue: form.venue, city: form.city,
+            description: form.description, category: form.category, image_url: form.image_url, price: Number(form.price),
+          };
+          sendNewEventEmails(recipients, newEventData).then((res) => {
+            if (!res.success) console.warn('EventKalam: New event emails failed:', res.error);
+          });
+        }
+      }
     }
     setSaving(false);
     onSaved();

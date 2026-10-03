@@ -1,2 +1,8 @@
 [functions.send-password-reset]
 verify_jwt = false
+
+[functions.send-email]
+verify_jwt = true
+
+[functions.event-reminders]
+verify_jwt = false
