@@ -35,7 +35,6 @@ import {
   Copy,
   Building2,
   Tag,
-  IndianRupee,
   Upload,
   CheckCircle2,
 } from 'lucide-react';
@@ -44,7 +43,7 @@ import { supabase, type UserProfile, type EventRow, type Registration } from '@/
 type View = 'home' | 'events' | 'eventDetail' | 'about' | 'contact' | 'login' | 'dashboard' | 'admin' | 'adminLogin' | 'resetPassword';
 
 const asset = (folder: string, name: string) => `/assets/images/${folder}/${name}`;
-const logo = asset('logo', 'WhatsApp_Image_2026-09-28_at_11.29.33_AM.jpeg');
+const logoImg = asset('logo', 'WhatsApp_Image_2026-09-28_at_11.29.33_AM.jpeg');
 const heroImage = asset('backgrounds', 'WhatsApp_Image_2026-09-28_at_10.35.52_AM.jpeg');
 const fallbackImages = [
   asset('events', 'WhatsApp_Image_2026-09-28_at_10.35.52_AM_(1).jpeg'),
@@ -53,15 +52,15 @@ const fallbackImages = [
 ];
 
 const categories = [
-  { name: 'Workshops', icon: Zap, text: 'Learn by doing with practical sessions led by people in the field.' },
-  { name: 'Hackathons', icon: Sparkles, text: 'Turn bold ideas into working prototypes with a team beside you.' },
-  { name: 'Career fairs', icon: Compass, text: 'Meet organisations, ask better questions and make a strong first impression.' },
-  { name: 'Cultural fests', icon: MessageCircle, text: 'Celebrate the voices, art and energy that make every campus unique.' },
+  { name: 'Workshops', icon: Zap, text: 'Practical, hands-on sessions led by people working in the field.' },
+  { name: 'Hackathons', icon: Sparkles, text: 'Build working prototypes with a team beside you in a weekend.' },
+  { name: 'Career fairs', icon: Compass, text: 'Meet organisations and make a strong first impression.' },
+  { name: 'Cultural fests', icon: MessageCircle, text: 'The voices, art and energy that make campus life worth remembering.' },
 ];
 
 function getTone(category: string): string {
-  const map: Record<string, string> = { Workshop: 'lime', Seminar: 'blue', Community: 'cyan', Career: 'blue', Networking: 'lime', Cultural: 'cyan', Hackathon: 'lime' };
-  return map[category] || 'blue';
+  const map: Record<string, string> = { Workshop: 'accent', Seminar: 'green', Community: 'accent', Career: 'green', Networking: 'accent', Cultural: 'green', Hackathon: 'accent' };
+  return map[category] || 'accent';
 }
 
 function formatDate(dateStr: string): string {
@@ -91,18 +90,13 @@ function eventStartTimestamp(event: EventRow): number {
   return date.getTime();
 }
 
-function eventSortTimestamp(event: EventRow): number {
-  return eventStartTimestamp(event);
-}
-
 function compareEvents(a: EventRow, b: EventRow): number {
-  const aTime = eventSortTimestamp(a);
-  const bTime = eventSortTimestamp(b);
+  const aTime = eventStartTimestamp(a);
+  const bTime = eventStartTimestamp(b);
   const aCompleted = isEventCompleted(a);
   const bCompleted = isEventCompleted(b);
   if (aCompleted !== bCompleted) return aCompleted ? 1 : -1;
   if (aCompleted && bCompleted) return bTime - aTime;
-
   const today = new Date().toISOString().slice(0, 10);
   const aToday = a.date === today;
   const bToday = b.date === today;
@@ -125,6 +119,7 @@ function App() {
   const [view, setView] = useState<View>('home');
   const [menuOpen, setMenuOpen] = useState(false);
   const [dark, setDark] = useState(true);
+  const [scrolled, setScrolled] = useState(false);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [events, setEvents] = useState<EventRow[]>([]);
@@ -146,12 +141,17 @@ function App() {
   }, [dark]);
 
   useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 20);
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
+  useEffect(() => {
     if (!toast) return;
     const timer = window.setTimeout(() => setToast(''), 3500);
     return () => window.clearTimeout(timer);
   }, [toast]);
 
-  // Fetch profile from DB. Sets profile state on success. Caller controls authLoading.
   const loadProfile = useCallback(async (userId: string): Promise<UserProfile | null> => {
     const { data, error } = await supabase
       .from('users')
@@ -169,7 +169,6 @@ function App() {
     return null;
   }, []);
 
-  // Load profile with retries — needed after signup when the DB trigger may not have run yet
   const loadProfileWithRetry = useCallback(async (userId: string, maxAttempts = 5): Promise<UserProfile | null> => {
     const delays = [0, 600, 1200, 2000, 3000];
     for (let i = 0; i < maxAttempts; i++) {
@@ -180,10 +179,8 @@ function App() {
     return null;
   }, [loadProfile]);
 
-  // Auth state — single source of truth
   useEffect(() => {
     let mounted = true;
-    // Restore session on page load/refresh
     supabase.auth.getSession().then(async ({ data }) => {
       if (!mounted) return;
       if (data.session) {
@@ -194,18 +191,15 @@ function App() {
         setAuthLoading(false);
       }
     });
-    // Only respond to definitive auth events
     const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
       if (!mounted) return;
       if (event === 'SIGNED_OUT') {
         setProfile(null);
         setAuthLoading(false);
       } else if (event === 'PASSWORD_RECOVERY') {
-        // User clicked the reset link in the email — show the reset page
         setAuthLoading(false);
         setView('resetPassword');
       }
-      // SIGNED_IN is handled by the onLogin callback in LoginPage to avoid double-loading
     });
     return () => {
       mounted = false;
@@ -213,7 +207,6 @@ function App() {
     };
   }, [loadProfileWithRetry]);
 
-  // Load published events
   const loadEvents = useCallback(async () => {
     setEventsLoading(true);
     const { data, error } = await supabase
@@ -260,10 +253,8 @@ function App() {
   }), [events, search, selectedCategory]);
 
   const selectedEvent = useMemo(() => events.find((e) => e.event_id === selectedEventId) || null, [events, selectedEventId]);
-
   const isAdmin = profile?.role === 'admin';
 
-  // Safety timeout: if authLoading stays true too long (e.g., both profile loads errored), release it
   useEffect(() => {
     if (!authLoading) return;
     const timer = setTimeout(() => setAuthLoading(false), 6000);
@@ -272,18 +263,19 @@ function App() {
 
   return (
     <div className="app-shell">
-      <header className="site-header">
+      <header className={scrolled ? 'site-header scrolled' : 'site-header'}>
         <button className="skip-link" onClick={() => document.getElementById('main-content')?.focus()}>Skip to content</button>
         <div className="nav-wrap">
           <button className="brand" onClick={() => go('home')} aria-label="EventKalam home">
-            <img src={logo} alt="EventKalam" />
+            <img src={logoImg} alt="EventKalam" className="brand-logo" />
+            <span className="brand-name">EventKalam</span>
           </button>
           <nav className={menuOpen ? 'main-nav is-open' : 'main-nav'} aria-label="Primary navigation">
             <NavItem label="Home" active={view === 'home'} onClick={() => go('home')} />
             <NavItem label="Events" active={view === 'events' || view === 'eventDetail'} onClick={() => go('events')} />
             <NavItem label="About" active={view === 'about'} onClick={() => go('about')} />
-            <NavItem label={isAdmin ? 'Admin Dashboard' : 'My Dashboard'} active={view === 'dashboard' || (isAdmin && view === 'admin')} onClick={() => profile ? (isAdmin ? go('admin') : go('dashboard')) : go('login')} />
-            {isAdmin && <NavItem label="My Profile" active={view === 'dashboard'} onClick={() => go('dashboard')} />}
+            <NavItem label={isAdmin ? 'Admin' : 'Dashboard'} active={view === 'dashboard' || (isAdmin && view === 'admin')} onClick={() => profile ? (isAdmin ? go('admin') : go('dashboard')) : go('login')} />
+            {isAdmin && <NavItem label="Profile" active={view === 'dashboard'} onClick={() => go('dashboard')} />}
             <NavItem label="Contact" active={view === 'contact'} onClick={() => go('contact')} />
           </nav>
           <div className="nav-actions">
@@ -294,7 +286,7 @@ function App() {
               <Loader2 size={18} className="spin" />
             ) : profile ? (
               <div className="nav-user-wrap">
-                <button className="profile-chip" onClick={() => go('dashboard')}>
+                <button className="profile-chip" onClick={() => go(isAdmin ? 'admin' : 'dashboard')}>
                   <span>{profile.name.charAt(0).toUpperCase()}</span>
                   <span className="profile-label">{profile.name.split(' ')[0]}</span>
                   <ChevronDown size={14} />
@@ -306,13 +298,13 @@ function App() {
             ) : (
               <button className="button button-primary nav-login" onClick={() => go('login')}><LogIn size={16} /> Sign in</button>
             )}
-            <button className="menu-toggle" onClick={() => setMenuOpen((current) => !current)} aria-label="Toggle menu">{menuOpen ? <X /> : <Menu />}</button>
+            <button className="icon-btn menu-toggle" onClick={() => setMenuOpen((current) => !current)} aria-label="Toggle menu">{menuOpen ? <X size={18} /> : <Menu size={18} />}</button>
           </div>
         </div>
       </header>
 
       <main id="main-content" tabIndex={-1}>
-        {view === 'home' && <Home go={go} openEvent={openEvent} events={events} loading={eventsLoading} profile={profile} />}
+        {view === 'home' && <Home go={go} openEvent={openEvent} events={events} loading={eventsLoading} />}
         {view === 'events' && <EventsPage events={filteredEvents} search={search} setSearch={setSearch} selectedCategory={selectedCategory} setSelectedCategory={setSelectedCategory} openEvent={openEvent} loading={eventsLoading} />}
         {view === 'eventDetail' && selectedEvent && (
           <EventDetailPage event={selectedEvent} profile={profile} go={go} goLogin={() => go('login')} onRegistered={() => { setRefreshKey(k => k + 1); }} setToast={setToast} />
@@ -326,7 +318,6 @@ function App() {
           setAuthLoading(true);
           const { data: { user } } = await supabase.auth.getUser();
           if (user) {
-            // New users need more retries — DB trigger may not have run yet
             const fetchedProfile = await loadProfileWithRetry(user.id, isNewUser ? 5 : 3);
             setAuthLoading(false);
             if (fetchedProfile) {
@@ -338,7 +329,6 @@ function App() {
               }
             } else {
               setToast('Account created. Please sign in.');
-              // Profile not ready yet — stay on login so user can sign in manually
             }
           } else {
             setAuthLoading(false);
@@ -355,11 +345,18 @@ function App() {
 
       <footer className="site-footer">
         <div className="footer-top">
-          <div className="footer-brand"><img src={logo} alt="EventKalam" /><p>More than a calendar. A place to find your next beginning.</p><div className="socials"><button aria-label="LinkedIn"><Linkedin size={17} /></button><button aria-label="Email"><Mail size={17} /></button><button aria-label="Messages"><MessageCircle size={17} /></button></div></div>
+          <div className="footer-brand-area">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <img src={logoImg} alt="EventKalam" className="brand-logo" />
+              <span style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 16 }}>EventKalam</span>
+            </div>
+            <p>A place for students to find events worth showing up for — and people worth meeting there.</p>
+            <div className="socials"><button aria-label="LinkedIn"><Linkedin size={16} /></button><button aria-label="Email"><Mail size={16} /></button><button aria-label="Messages"><MessageCircle size={16} /></button></div>
+          </div>
           <div><p className="footer-heading">Explore</p><button onClick={() => go('events')}>All events</button><button onClick={() => go('about')}>Our story</button><button onClick={() => go('contact')}>Contact us</button></div>
-          <div><p className="footer-heading">Stay in the loop</p><p className="footer-muted">One thoughtful email when something worth showing up for is happening.</p><div className="newsletter"><input aria-label="Email address" placeholder="Your email address" type="email" /><button aria-label="Subscribe"><ArrowRight size={17} /></button></div></div>
+          <div><p className="footer-heading">Stay in the loop</p><p style={{ color: 'var(--muted)', fontSize: 13, maxWidth: 260 }}>One email when something worth your time is happening.</p><div className="newsletter"><input aria-label="Email address" placeholder="Your email" type="email" /><button aria-label="Subscribe"><ArrowRight size={16} /></button></div></div>
         </div>
-        <div className="footer-bottom"><span>© 2026 EventKalam</span><span>Built for curious minds in every campus.</span></div>
+        <div className="footer-bottom"><span>© 2026 EventKalam</span><span>Built for curious minds on every campus.</span></div>
       </footer>
       {toast && <div className="toast" role="status"><Check size={17} /> {toast}</div>}
     </div>
@@ -373,46 +370,140 @@ function NavItem({ label, active, onClick }: { label: string; active: boolean; o
 // ============================================================
 // HOME
 // ============================================================
-function Home({ go, openEvent, events, loading, profile }: { go: (view: View) => void; openEvent: (id: string) => void; events: EventRow[]; loading: boolean; profile: UserProfile | null }) {
-  const upcoming = events.filter((event) => !isEventCompleted(event)).slice(0, 3);
+function Home({ go, openEvent, events, loading }: { go: (view: View) => void; openEvent: (id: string) => void; events: EventRow[]; loading: boolean }) {
+  const upcoming = events.filter((event) => !isEventCompleted(event)).slice(0, 4);
+  const liveCount = events.filter((e) => !isEventCompleted(e)).length;
   return <>
-    <section className="hero-section">
+    <section className="hero">
       <div className="hero-bg" style={{ backgroundImage: `url("${heroImage}")` }} />
       <div className="hero-overlay" />
-      <div className="hero-content page-width">
-        <div className="hero-copy">
-          <p className="eyebrow"><span className="eyebrow-dot" /> The student event platform</p>
-          <h1>Find the room where your <span>next chapter</span> begins.</h1>
-          <p className="hero-description">Workshops, ideas, people and opportunities that move you forward. Explore what is happening around you and make your next yes count.</p>
-          <div className="hero-actions"><button className="button button-primary" onClick={() => go('events')}>Explore events <ArrowRight size={17} /></button><button className="button button-ghost" onClick={() => document.getElementById('how-it-works')?.scrollIntoView({ behavior: 'smooth' })}>How it works</button></div>
-          <div className="hero-proof"><div className="avatar-stack"><span>R</span><span>N</span><span>K</span><span>+</span></div><div><strong>12,000+ students</strong><small>already showing up with purpose</small></div></div>
+      <div className="hero-inner">
+        <span className="hero-tag">Student events, locally curated</span>
+        <h1>Find events worth showing up for.</h1>
+        <p className="hero-lead">Workshops, hackathons, career fairs and cultural moments happening around your campus. No noise — just things worth your time.</p>
+        <div className="hero-actions">
+          <button className="button button-primary" onClick={() => go('events')}>Browse events <ArrowRight size={16} /></button>
+          <button className="button button-ghost" onClick={() => document.getElementById('how-it-works')?.scrollIntoView({ behavior: 'smooth' })}>How it works</button>
         </div>
-        <div className="hero-feature"><div className="feature-image-wrap"><img src={asset('logo', 'WhatsApp_Image_2026-09-28_at_10.35.52_AM_(1).jpeg')} alt="Students celebrating at an event" /></div><div className="floating-card float-top"><span className="mini-icon lime"><CalendarDays size={17} /></span><div><strong>{events.length}</strong><small>events live now</small></div></div><div className="floating-card float-bottom"><span className="mini-icon blue"><Users size={17} /></span><div><strong>4.9 / 5</strong><small>student experience</small></div></div></div>
       </div>
-      <div className="hero-stats page-width"><Stat number={String(events.length)} label="Events hosted" /><Stat number="12K+" label="Students connected" /><Stat number="48" label="Campus partners" /></div>
     </section>
-    <section className="section page-width upcoming-section"><SectionHeading eyebrow="Don't miss what matters" title="Upcoming events & timings" text="Good things happen when you know where to look. Find your next workshop, conversation or opportunity." action={<button className="text-button" onClick={() => go('events')}>View all events <ArrowRight size={16} /></button>} />
-      {loading ? (
-        <div className="event-grid featured-grid">{[0,1,2].map((i) => <div key={i} className="skeleton-card" />)}</div>
-      ) : upcoming.length ? (
-        <div className="event-grid featured-grid">{upcoming.map((event) => <EventCard key={event.event_id} event={event} onOpen={() => openEvent(event.event_id)} />)}</div>
-      ) : (
-        <div className="empty-state"><Compass size={30} /><h3>No upcoming events yet.</h3><p>Check back soon — new events are added regularly.</p></div>
-      )}
+
+    <section className="section">
+      <div className="page-width">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow"><span className="eyebrow-dot" /> What's coming up</p>
+            <h2>Upcoming events</h2>
+            <p>Browse what's happening soon. Click any event for full details and registration.</p>
+          </div>
+          <button className="text-button" onClick={() => go('events')}>View all <ArrowRight size={16} /></button>
+        </div>
+        {loading ? (
+          <div className="event-grid">{[0,1,2].map((i) => <div key={i} className="skeleton-card" />)}</div>
+        ) : upcoming.length ? (
+          <div className="event-list">
+            {upcoming.map((event) => <EventRowItem key={event.event_id} event={event} onOpen={() => openEvent(event.event_id)} />)}
+          </div>
+        ) : (
+          <div className="empty-state"><Compass size={28} /><h3>No upcoming events yet.</h3><p>Check back soon — new events are added regularly.</p></div>
+        )}
+      </div>
     </section>
-    <section className="section categories-section"><div className="page-width"><SectionHeading eyebrow="A place for every interest" title="Choose your kind of momentum" text="Whether you want to build, perform, connect or learn, there is a place for you here." /><div className="category-grid">{categories.map(({ name, icon: Icon, text }) => <button className="category-card" key={name} onClick={() => go('events')}><span className="category-icon"><Icon size={22} /></span><span><strong>{name}</strong><small>{text}</small></span><ArrowRight size={18} /></button>)}</div></div></section>
-    <section className="section process-section" id="how-it-works"><div className="page-width"><SectionHeading eyebrow="Simple by design" title="From curious to connected" text="A few small steps can change the direction of a semester." /><div className="process-grid"><ProcessStep number="01" icon={Search} title="Browse" text="Find an event that feels like a good use of your time." /><ProcessStep number="02" icon={Ticket} title="Register" text="Save your place in seconds, without the long forms." /><ProcessStep number="03" icon={GraduationCap} title="Participate" text="Show up, learn something and leave with more than you came with." /></div></div></section>
-    <section className="quote-section"><div className="page-width quote-inner"><span className="quote-mark">"</span><blockquote>EventKalam helped me find a workshop outside my course. I walked in nervous and walked out with a project, a mentor and two new friends.</blockquote><div className="quote-author"><span className="author-avatar">SM</span><span><strong>Sneha M.</strong><small>Final year student, Warangal</small></span></div></div></section>
-    <section className="cta-section page-width"><div><p className="eyebrow">Your next opportunity is closer than you think</p><h2>Make room for a little more possibility.</h2></div><button className="button button-light" onClick={() => go('events')}>Explore events <ArrowRight size={17} /></button></section>
+
+    <section className="section-tight" style={{ borderTop: `1px solid var(--line)`, borderBottom: `1px solid var(--line)` }}>
+      <div className="page-width">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow"><span className="eyebrow-dot" /> Browse by interest</p>
+            <h2>What are you looking for?</h2>
+          </div>
+        </div>
+        <div className="cat-list">
+          {categories.map(({ name, icon: Icon, text }) => (
+            <button className="cat-row" key={name} onClick={() => go('events')}>
+              <span className="cat-icon"><Icon size={20} /></span>
+              <span>
+                <span className="cat-name" style={{ display: 'block' }}>{name}</span>
+                <span className="cat-text">{text}</span>
+              </span>
+              <ArrowRight size={18} className="cat-arrow" />
+            </button>
+          ))}
+        </div>
+      </div>
+    </section>
+
+    <section className="section" id="how-it-works">
+      <div className="page-width">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow"><span className="eyebrow-dot" /> Simple by design</p>
+            <h2>Three steps, no friction</h2>
+            <p>From curious to registered in under a minute.</p>
+          </div>
+        </div>
+        <div className="process-row">
+          <div className="process-step">
+            <div className="step-num">01</div>
+            <h3>Browse</h3>
+            <p>Find an event that feels like a good use of your time.</p>
+          </div>
+          <div className="process-step">
+            <div className="step-num">02</div>
+            <h3>Register</h3>
+            <p>Save your place in seconds — no long forms, no hoops.</p>
+          </div>
+          <div className="process-step">
+            <div className="step-num">03</div>
+            <h3>Show up</h3>
+            <p>Arrive, learn something, leave with more than you came with.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section className="page-width">
+      <div className="cta-band">
+        <div>
+          <p className="eyebrow">{liveCount > 0 ? `${liveCount} event${liveCount > 1 ? 's' : ''} live now` : 'Events added weekly'}</p>
+          <h2>Your next opportunity is closer than you think.</h2>
+        </div>
+        <button className="button button-light" onClick={() => go('events')}>Explore events <ArrowRight size={16} /></button>
+      </div>
+    </section>
   </>;
 }
 
-function Stat({ number, label }: { number: string; label: string }) { return <div className="stat"><strong>{number}</strong><span>{label}</span></div>; }
-function SectionHeading({ eyebrow, title, text, action }: { eyebrow: string; title: string; text: string; action?: React.ReactNode }) { return <div className="section-heading"><div><p className="eyebrow">{eyebrow}</p><h2>{title}</h2><p>{text}</p></div>{action}</div>; }
-function ProcessStep({ number, icon: Icon, title, text }: { number: string; icon: typeof Search; title: string; text: string }) { return <div className="process-step"><span className="step-number">{number}</span><Icon size={23} /><h3>{title}</h3><p>{text}</p></div>; }
+function EventRowItem({ event, onOpen }: { event: EventRow; onOpen: () => void }) {
+  const seats = availableSeats(event);
+  const completed = isEventCompleted(event);
+  const statusLabel = seats === 0 ? 'Sold out' : seats < 20 ? 'Filling fast' : 'Available';
+  return (
+    <div className="event-row" onClick={onOpen} style={{ cursor: 'pointer' }}>
+      <img className="event-row-img" src={event.image_url || fallbackImages[0]} alt={event.title} loading="lazy" style={completed ? { filter: 'brightness(0.5)' } : undefined} />
+      <div className="event-row-content">
+        <div className="event-row-meta">
+          <span><CalendarDays size={13} /> {formatDate(event.date)}</span>
+          <span><Clock3 size={13} /> {event.time}</span>
+          <span><MapPin size={13} /> {event.venue}{event.city ? `, ${event.city}` : ''}</span>
+        </div>
+        <div className="event-row-title">{event.title}</div>
+        <div className="event-row-desc">{event.description}</div>
+      </div>
+      <div className="event-row-aside">
+        <span className={`pill ${getTone(event.category) === 'accent' ? 'pill-accent' : 'pill-green'}`}>{event.category}</span>
+        {completed ? (
+          <span className="pill pill-muted">Completed</span>
+        ) : (
+          <span className={`pill ${seats === 0 ? 'pill-muted' : seats < 20 ? 'pill-warn' : 'pill-green'}`}>{statusLabel}</span>
+        )}
+      </div>
+    </div>
+  );
+}
 
 // ============================================================
-// EVENT CARD
+// EVENT CARD (grid)
 // ============================================================
 function EventCard({ event, onOpen }: { event: EventRow; onOpen: () => void }) {
   const seats = availableSeats(event);
@@ -423,28 +514,25 @@ function EventCard({ event, onOpen }: { event: EventRow; onOpen: () => void }) {
     <article className="event-card" onClick={onOpen} style={{ cursor: 'pointer' }}>
       <div className="event-image">
         <img src={event.image_url || fallbackImages[0]} alt={event.title} loading="lazy" style={completed ? { filter: 'brightness(0.6)' } : undefined} />
-        {completed && (
-          <div className="event-completed-overlay">
-            <CheckCircle2 size={18} />
-            COMPLETED
-          </div>
-        )}
-        <span className={`event-badge ${getTone(event.category)}`}>{event.category}</span>
-        {!completed && <span className="event-status">{statusLabel}</span>}
+        {completed && <div className="event-completed-overlay"><CheckCircle2 size={16} /> Completed</div>}
+        <div className="event-badge-row">
+          <span className={`pill ${getTone(event.category) === 'accent' ? 'pill-accent' : 'pill-green'}`}>{event.category}</span>
+        </div>
+        {!completed && <div className="event-status-row"><span className={`pill ${seats === 0 ? 'pill-muted' : seats < 20 ? 'pill-warn' : 'pill-green'}`}>{statusLabel}</span></div>}
       </div>
       <div className="event-body">
         <div className="event-meta">
-          <span><CalendarDays size={14} /> {formatDate(event.date)}</span>
-          <span><Clock3 size={14} /> {event.time}</span>
+          <span><CalendarDays size={13} /> {formatDate(event.date)}</span>
+          <span><Clock3 size={13} /> {event.time}</span>
         </div>
         <h3>{event.title}</h3>
         <p>{event.description}</p>
-        <div className="event-location"><MapPin size={15} /> {event.venue}{event.city ? `, ${event.city}` : ''}</div>
+        <div className="event-location"><MapPin size={14} /> {event.venue}{event.city ? `, ${event.city}` : ''}</div>
         <div className="seats-row">
           <span>{seats} seats left</span>
           <div className="seat-bar"><span style={{ width: `${percent}%` }} /></div>
         </div>
-        <button className="button button-outline" onClick={(e) => { e.stopPropagation(); onOpen(); }}>View details <ArrowRight size={16} /></button>
+        <button className="button button-outline" onClick={(e) => { e.stopPropagation(); onOpen(); }}>View details <ArrowRight size={15} /></button>
       </div>
     </article>
   );
@@ -461,7 +549,7 @@ function EventsPage({ events, search, setSearch, selectedCategory, setSelectedCa
       <div className="page-intro">
         <p className="eyebrow"><span className="eyebrow-dot" /> Find your next yes</p>
         <h1>Events worth showing up for.</h1>
-        <p>Explore workshops, conversations, meetups and experiences designed to help students and graduates move forward.</p>
+        <p>Workshops, seminars, meetups and experiences designed to help students move forward.</p>
       </div>
       <div className="event-toolbar">
         <label className="search-box"><Search size={18} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search events, interests or places" /></label>
@@ -470,11 +558,11 @@ function EventsPage({ events, search, setSearch, selectedCategory, setSelectedCa
         </select>
       </div>
       {loading ? (
-        <div className="event-grid all-events-grid">{[0,1,2,3,4,5].map((i) => <div key={i} className="skeleton-card" />)}</div>
+        <div className="event-grid">{[0,1,2,3,4,5].map((i) => <div key={i} className="skeleton-card" />)}</div>
       ) : events.length ? (
-        <div className="event-grid all-events-grid">{events.map((event) => <EventCard key={event.event_id} event={event} onOpen={() => openEvent(event.event_id)} />)}</div>
+        <div className="event-grid">{events.map((event) => <EventCard key={event.event_id} event={event} onOpen={() => openEvent(event.event_id)} />)}</div>
       ) : (
-        <div className="empty-state"><Compass size={30} /><h3>Nothing matched that search.</h3><p>Try a different word or explore all events.</p></div>
+        <div className="empty-state"><Compass size={28} /><h3>Nothing matched that search.</h3><p>Try a different word or explore all events.</p><button className="button button-primary" onClick={() => { setSearch(''); setSelectedCategory('All events'); }}>Clear filters</button></div>
       )}
     </section>
   );
@@ -561,7 +649,7 @@ function EventDetailPage({ event, profile, go, goLogin, onRegistered, setToast }
         <div className="event-detail-main">
           <div className="event-detail-banner">
             <img src={event.image_url || fallbackImages[0]} alt={event.title} />
-            <span className={`event-badge ${getTone(event.category)}`}>{event.category}</span>
+            <span className={`pill ${getTone(event.category) === 'accent' ? 'pill-accent' : 'pill-green'}`}>{event.category}</span>
           </div>
           <h1>{event.title}</h1>
           <div className="event-detail-meta">
@@ -584,8 +672,8 @@ function EventDetailPage({ event, profile, go, goLogin, onRegistered, setToast }
             <div className="reg-sidebar-card">
               <div style={{ textAlign: 'center', padding: '8px 0' }}>
                 <CheckCircle2 size={36} style={{ color: 'var(--muted)', margin: '0 auto 10px' }} />
-                <p style={{ color: 'var(--muted)', fontWeight: 700, fontSize: 13, margin: 0 }}>This event has been completed.</p>
-                <p style={{ color: 'var(--muted)', fontSize: 11, marginTop: 6 }}>Registration is no longer available.</p>
+                <p style={{ color: 'var(--muted)', fontWeight: 600, fontSize: 14, margin: 0 }}>This event has been completed.</p>
+                <p style={{ color: 'var(--muted)', fontSize: 12, marginTop: 6 }}>Registration is no longer available.</p>
               </div>
               <button className="button button-outline" disabled style={{ opacity: 0.5, cursor: 'not-allowed' }}>Event Completed</button>
             </div>
@@ -667,9 +755,31 @@ function EventDetailPage({ event, profile, go, goLogin, onRegistered, setToast }
 // ABOUT
 // ============================================================
 function AboutPage({ go }: { go: (view: View) => void }) {
-  return <section className="page-content page-width about-page"><div className="page-intro"><p className="eyebrow"><span className="eyebrow-dot" /> Why EventKalam exists</p><h1>We believe showing up changes everything.</h1><p>EventKalam was created for the in-between moments: when you are curious, not quite sure, and ready for something new.</p></div><div className="about-feature"><img src={heroImage} alt="Students and graduates connecting through an event" /><div><p className="eyebrow">Our point of view</p><h2>Opportunity should feel close, clear and welcoming.</h2><p>Students do not need more noise. They need better pathways to people, ideas and experiences that make their future feel a little more possible. We bring those pathways into one thoughtful place.</p><button className="button button-primary" onClick={() => go('events')}>Find your next event <ArrowRight size={17} /></button></div></div><div className="values-grid"><Value icon={ShieldCheck} title="Trust first" text="Clear details, real organisers and experiences built with care." /><Value icon={Users} title="People powered" text="The best outcomes start with a room full of different perspectives." /><Value icon={Sparkles} title="Always curious" text="We make space for questions, experiments and unexpected interests." /></div></section>;
+  return (
+    <section className="page-content page-width">
+      <div className="page-intro">
+        <p className="eyebrow"><span className="eyebrow-dot" /> Why EventKalam exists</p>
+        <h1>We believe showing up changes everything.</h1>
+        <p>EventKalam was created for the in-between moments: when you are curious, not quite sure, and ready for something new.</p>
+      </div>
+      <div className="about-feature">
+        <img src={heroImage} alt="Students connecting through an event" />
+        <div>
+          <p className="eyebrow">Our point of view</p>
+          <h2>Opportunity should feel close, clear and welcoming.</h2>
+          <p>Students don't need more noise. They need better pathways to people, ideas and experiences that make their future feel a little more possible.</p>
+          <p>We bring those pathways into one place — curated, local and real.</p>
+          <button className="button button-primary" onClick={() => go('events')}>Find your next event <ArrowRight size={16} /></button>
+        </div>
+      </div>
+      <div className="values-grid">
+        <div className="value-card"><ShieldCheck size={22} /><h3>Trust first</h3><p>Clear details, real organisers and experiences built with care.</p></div>
+        <div className="value-card"><Users size={22} /><h3>People powered</h3><p>The best outcomes start with a room full of different perspectives.</p></div>
+        <div className="value-card"><Sparkles size={22} /><h3>Always curious</h3><p>We make space for questions, experiments and unexpected interests.</p></div>
+      </div>
+    </section>
+  );
 }
-function Value({ icon: Icon, title, text }: { icon: typeof ShieldCheck; title: string; text: string }) { return <div className="value-card"><Icon size={22} /><h3>{title}</h3><p>{text}</p></div>; }
 
 // ============================================================
 // CONTACT
@@ -678,8 +788,12 @@ function ContactPage({ setToast }: { setToast: (value: string) => void }) {
   const [sent, setSent] = useState(false);
   const [form, setForm] = useState({ name: '', email: '', subject: '', message: '', company: '' });
   return (
-    <section className="page-content page-width contact-page">
-      <div className="page-intro"><p className="eyebrow"><span className="eyebrow-dot" /> We would love to hear from you</p><h1>Have a question? Start here.</h1><p>Tell us what is on your mind and our team will get back to you soon.</p></div>
+    <section className="page-content page-width">
+      <div className="page-intro">
+        <p className="eyebrow"><span className="eyebrow-dot" /> We'd love to hear from you</p>
+        <h1>Have a question? Start here.</h1>
+        <p>Tell us what's on your mind and our team will get back to you soon.</p>
+      </div>
       <div className="contact-layout">
         <form className="contact-form" onSubmit={(e) => { e.preventDefault(); if (form.company) return; setSent(true); setToast('Your message has been sent. Thank you for reaching out.'); setForm({ name: '', email: '', subject: '', message: '', company: '' }); }}>
           <input type="text" name="company" value={form.company} onChange={(e) => setForm({ ...form, company: e.target.value })} style={{ display: 'none' }} tabIndex={-1} autoComplete="off" />
@@ -688,7 +802,11 @@ function ContactPage({ setToast }: { setToast: (value: string) => void }) {
           <label>Message<textarea required rows={6} value={form.message} onChange={(e) => setForm({ ...form, message: e.target.value })} placeholder="Write your message here..." /></label>
           <button className="button button-primary" type="submit">{sent ? <><Check size={16} /> Message sent</> : <>Send message <ArrowRight size={16} /></>}</button>
         </form>
-        <div className="contact-aside"><div className="contact-card"><Mail size={20} /><div><strong>Email us</strong><span>hello@eventkalam.com</span></div></div><div className="contact-card"><MapPin size={20} /><div><strong>Find us</strong><span>Warangal, Telangana</span></div></div><div className="contact-card"><Clock3 size={20} /><div><strong>Working hours</strong><span>Mon – Fri, 9:00 AM – 6:00 PM</span></div></div></div>
+        <div className="contact-aside">
+          <div className="contact-card"><Mail size={20} /><div><strong>Email us</strong><span>hello@eventkalam.com</span></div></div>
+          <div className="contact-card"><MapPin size={20} /><div><strong>Find us</strong><span>Warangal, Telangana</span></div></div>
+          <div className="contact-card"><Clock3 size={20} /><div><strong>Working hours</strong><span>Mon – Fri, 9:00 AM – 6:00 PM</span></div></div>
+        </div>
       </div>
     </section>
   );
@@ -773,19 +891,22 @@ function LoginPage({ onLogin, go }: { onLogin: (isNewUser?: boolean) => void; go
 
   return (
     <section className="auth-page">
-      <div className="auth-visual" style={{ backgroundImage: `linear-gradient(180deg, rgba(5,11,31,.08), rgba(5,11,31,.9)), url("${heroImage}")` }}>
-        <img src={logo} alt="EventKalam" />
-        <div><p className="eyebrow">A better place to begin</p><h1>There is more waiting for you.</h1><p>Keep your events, ideas and new beginnings in one place.</p></div>
+      <div className="auth-visual" style={{ backgroundImage: `linear-gradient(180deg, rgba(14,13,11,.3), rgba(14,13,11,.85)), url("${heroImage}")` }}>
+        <div className="auth-visual-brand">
+          <img src={logoImg} alt="EventKalam" className="brand-logo" />
+          <span>EventKalam</span>
+        </div>
+        <div><p className="eyebrow">A better place to begin</p><h1>There's more waiting for you.</h1><p>Keep your events, ideas and new beginnings in one place.</p></div>
       </div>
       <div className="auth-card">
         <div className="auth-card-head">
-          <p className="eyebrow">Welcome to EventKalam</p>
+          <p className="eyebrow">Welcome</p>
           <h2>{authMode === 'admin' ? 'Admin access' : mode === 'login' ? 'Good to see you.' : 'Make a little room.'}</h2>
           <p>{authMode === 'admin' ? 'Sign in to manage events and registrations.' : mode === 'login' ? 'Sign in to keep exploring.' : 'Create your free student account.'}</p>
         </div>
         <div className="auth-mode-switch">
-          <button className={authMode === 'user' ? 'active' : ''} onClick={() => { setAuthMode('user'); setMode('login'); setError(''); setResetSent(false); }}>User Login</button>
-          <button className={authMode === 'admin' ? 'active' : ''} onClick={() => { setAuthMode('admin'); setMode('login'); setError(''); setResetSent(false); }}><ShieldCheck size={14} /> Admin Login</button>
+          <button className={authMode === 'user' ? 'active' : ''} onClick={() => { setAuthMode('user'); setMode('login'); setError(''); setResetSent(false); }}>User</button>
+          <button className={authMode === 'admin' ? 'active' : ''} onClick={() => { setAuthMode('admin'); setMode('login'); setError(''); setResetSent(false); }}><ShieldCheck size={14} /> Admin</button>
         </div>
         {authMode === 'user' && (
           <div className="auth-tabs">
@@ -851,13 +972,13 @@ function ResetPasswordPage({ go, setToast }: { go: (view: View) => void; setToas
   if (success) {
     return (
       <section className="auth-page">
-        <div className="auth-visual" style={{ backgroundImage: `linear-gradient(180deg, rgba(5,11,31,.08), rgba(5,11,31,.9)), url("${heroImage}")` }}>
-          <img src={logo} alt="EventKalam" />
-          <div><p className="eyebrow">A better place to begin</p><h1>There is more waiting for you.</h1><p>Keep your events, ideas and new beginnings in one place.</p></div>
+        <div className="auth-visual" style={{ backgroundImage: `linear-gradient(180deg, rgba(14,13,11,.3), rgba(14,13,11,.85)), url("${heroImage}")` }}>
+          <div className="auth-visual-brand"><img src={logoImg} alt="EventKalam" className="brand-logo" /><span>EventKalam</span></div>
+          <div><p className="eyebrow">A better place to begin</p><h1>There's more waiting for you.</h1><p>Keep your events, ideas and new beginnings in one place.</p></div>
         </div>
         <div className="auth-card">
           <div className="auth-card-head">
-            <p className="eyebrow">Welcome to EventKalam</p>
+            <p className="eyebrow">Welcome</p>
             <h2>Password updated.</h2>
             <p>Your new password is ready. You can sign in now.</p>
           </div>
@@ -870,13 +991,13 @@ function ResetPasswordPage({ go, setToast }: { go: (view: View) => void; setToas
 
   return (
     <section className="auth-page">
-      <div className="auth-visual" style={{ backgroundImage: `linear-gradient(180deg, rgba(5,11,31,.08), rgba(5,11,31,.9)), url("${heroImage}")` }}>
-        <img src={logo} alt="EventKalam" />
-        <div><p className="eyebrow">A better place to begin</p><h1>There is more waiting for you.</h1><p>Keep your events, ideas and new beginnings in one place.</p></div>
+      <div className="auth-visual" style={{ backgroundImage: `linear-gradient(180deg, rgba(14,13,11,.3), rgba(14,13,11,.85)), url("${heroImage}")` }}>
+        <div className="auth-visual-brand"><img src={logoImg} alt="EventKalam" className="brand-logo" /><span>EventKalam</span></div>
+        <div><p className="eyebrow">A better place to begin</p><h1>There's more waiting for you.</h1><p>Keep your events, ideas and new beginnings in one place.</p></div>
       </div>
       <div className="auth-card">
         <div className="auth-card-head">
-          <p className="eyebrow">Welcome to EventKalam</p>
+          <p className="eyebrow">Welcome</p>
           <h2>Set a new password.</h2>
           <p>Choose a strong password to secure your account.</p>
         </div>
@@ -929,7 +1050,6 @@ function Dashboard({ profile, events, go, onAction, setToast }: {
   }, [events, profile.user_id]);
 
   const upcomingRegs = myRegistrations.filter((r) => new Date(r.event.date) >= new Date() && r.reg.registration_status !== 'attended');
-  const pastRegs = myRegistrations.filter((r) => r.reg.registration_status === 'attended');
   const attendedCount = myRegistrations.filter((r) => r.reg.registration_status === 'attended').length;
 
   const handleCancelReg = async (eventId: string) => {
@@ -952,12 +1072,12 @@ function Dashboard({ profile, events, go, onAction, setToast }: {
   };
 
   return (
-    <section className="page-content page-width dashboard-page">
+    <section className="page-content page-width">
       <div className="dashboard-head">
         <div>
-          <p className="eyebrow"><span className="eyebrow-dot" /> Student dashboard</p>
+          <p className="eyebrow"><span className="eyebrow-dot" /> Dashboard</p>
           <h1>Welcome back, {profile.name.split(' ')[0]}.</h1>
-          <p>Here is where your next chapters are taking shape.</p>
+          <p>Here's where your next chapters are taking shape.</p>
         </div>
         <div className="dashboard-avatar">{profile.name.charAt(0).toUpperCase()}</div>
       </div>
@@ -983,7 +1103,7 @@ function Dashboard({ profile, events, go, onAction, setToast }: {
                 <img src={event.image_url || fallbackImages[0]} alt="" />
                 <div>
                   <strong>{event.title}</strong>
-                  <span><CalendarDays size={14} /> {formatDate(event.date)} <span className="dot-separator" /> <MapPin size={14} /> {event.venue}</span>
+                  <span><CalendarDays size={13} /> {formatDate(event.date)} <span className="dot-separator" /> <MapPin size={13} /> {event.venue}</span>
                   <span className="reg-id-line">ID: {reg.registration_id.slice(0, 8).toUpperCase()} · {reg.seats} seat(s)</span>
                 </div>
                 {reg.registration_status === 'attended' ? (
@@ -997,7 +1117,7 @@ function Dashboard({ profile, events, go, onAction, setToast }: {
             ))
           ) : (
             <div className="dashboard-empty">
-              <LayoutDashboard size={28} />
+              <LayoutDashboard size={24} />
               <h3>{tab === 'upcoming' ? 'No upcoming events.' : 'No registrations yet.'}</h3>
               <p>Save an event and it will appear here.</p>
               <button className="button button-primary" onClick={() => go('events')}>Explore events <ArrowRight size={16} /></button>
@@ -1021,7 +1141,7 @@ function Dashboard({ profile, events, go, onAction, setToast }: {
               <div className="profile-row"><span>Email</span><strong>{profile.email}</strong></div>
               <div className="profile-row"><span>Phone</span><strong>{profile.phone || 'Not set'}</strong></div>
               <div className="profile-row"><span>Role</span><strong>{profile.role}</strong></div>
-              <button className="button button-ghost" onClick={() => setEditing(true)}><Pencil size={14} /> Edit profile</button>
+              <button className="button button-ghost" onClick={() => setEditing(true)} style={{ marginTop: 16 }}><Pencil size={14} /> Edit profile</button>
             </div>
           )}
         </div>
@@ -1072,7 +1192,7 @@ function AdminPage({ profile, go, setToast, onAction }: {
   const publishedCount = adminEvents.filter((e) => e.status === 'published').length;
 
   return (
-    <section className="page-content page-width admin-page">
+    <section className="page-content page-width">
       <div className="dashboard-head">
         <div>
           <p className="eyebrow"><span className="eyebrow-dot" /> Admin panel</p>
@@ -1105,7 +1225,7 @@ function AdminPage({ profile, go, setToast, onAction }: {
         {loading ? (
           <div className="empty-state"><Loader2 size={28} className="spin" /><h3>Loading events...</h3></div>
         ) : adminEvents.length === 0 ? (
-          <div className="empty-state"><CalendarDays size={30} /><h3>No events yet.</h3><p>Create your first event to get started.</p></div>
+          <div className="empty-state"><CalendarDays size={28} /><h3>No events yet.</h3><p>Create your first event to get started.</p></div>
         ) : (
           adminEvents.map((event) => (
             <div className="admin-event-row" key={event.event_id}>
@@ -1124,7 +1244,7 @@ function AdminPage({ profile, go, setToast, onAction }: {
                 <button className="icon-btn" onClick={() => setViewingEvent(event)} title="View registrations"><Eye size={15} /></button>
                 {event.status === 'published' && <button className="icon-btn" onClick={() => handleStatusChange(event.event_id, 'cancelled')} title="Cancel event"><X size={15} /></button>}
                 {event.status === 'cancelled' && <button className="icon-btn" onClick={() => handleStatusChange(event.event_id, 'published')} title="Publish"><Check size={15} /></button>}
-                {event.status === 'published' && <button className="icon-btn" onClick={() => handleStatusChange(event.event_id, 'completed')} title="Mark completed"><Check size={15} /></button>}
+                {event.status === 'published' && <button className="icon-btn" onClick={() => handleStatusChange(event.event_id, 'completed')} title="Mark completed"><CheckCircle2 size={15} /></button>}
                 <button className="icon-btn danger" onClick={() => handleDelete(event.event_id)} title="Delete"><Trash2 size={15} /></button>
               </div>
             </div>
@@ -1263,10 +1383,10 @@ function AdminEventForm({ event, userId, onClose, onSaved, setToast }: {
                 onChange={handleImageUpload}
               />
             </div>
-            {uploadError && <p style={{ color: '#ff5f5f', fontSize: 12, marginTop: 4 }}>{uploadError}</p>}
+            {uploadError && <p style={{ color: 'var(--danger)', fontSize: 12, marginTop: 4 }}>{uploadError}</p>}
             {form.image_url && !imageOptions.includes(form.image_url) && (
               <div style={{ marginTop: 8 }}>
-                <img src={form.image_url} alt="Preview" style={{ height: 70, width: 100, objectFit: 'cover', borderRadius: 8, border: '2px solid var(--cyan)' }} />
+                <img src={form.image_url} alt="Preview" style={{ height: 60, width: 90, objectFit: 'cover', borderRadius: 'var(--radius)', border: '2px solid var(--accent)' }} />
               </div>
             )}
           </label>
