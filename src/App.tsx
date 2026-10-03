@@ -1258,12 +1258,15 @@ function AdminPage({ profile, go, setToast, onAction }: {
 function AdminEventForm({ event, userId, onClose, onSaved, setToast }: {
   event: EventRow | null; userId: string; onClose: () => void; onSaved: () => void; setToast: (value: string) => void;
 }) {
+  const parsedTime = (event?.time || '').split(' - ');
+  const [startTime, setStartTime] = useState(parsedTime[0] || '10:00 AM');
+  const [endTime, setEndTime] = useState(parsedTime[1] || '12:00 PM');
   const [form, setForm] = useState({
     title: event?.title || '',
     description: event?.description || '',
     category: event?.category || 'Workshop',
     date: event?.date || '',
-    time: event?.time || '',
+    time: event?.time || `${startTime} - ${endTime}`,
     venue: event?.venue || '',
     city: event?.city || '',
     capacity: event?.capacity || 50,
@@ -1275,6 +1278,25 @@ function AdminEventForm({ event, userId, onClose, onSaved, setToast }: {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const timeSlots = useMemo(() => {
+    const slots: string[] = [];
+    for (let h = 8; h <= 22; h++) {
+      for (const m of [0, 30]) {
+        if (h === 22 && m === 30) break;
+        const period = h < 12 ? 'AM' : 'PM';
+        const hour12 = h % 12 === 0 ? 12 : h % 12;
+        slots.push(`${hour12}:${String(m).padStart(2, '0')} ${period}`);
+      }
+    }
+    return slots;
+  }, []);
+
+  const handleTimeChange = (newStart: string, newEnd: string) => {
+    setStartTime(newStart);
+    setEndTime(newEnd);
+    setForm((prev) => ({ ...prev, time: `${newStart} - ${newEnd}` }));
+  };
 
   const imageOptions = fallbackImages;
 
@@ -1348,7 +1370,18 @@ function AdminEventForm({ event, userId, onClose, onSaved, setToast }: {
           </div>
           <div className="form-row">
             <label>Date<input required type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} /></label>
-            <label>Time<input required value={form.time} onChange={(e) => setForm({ ...form, time: e.target.value })} placeholder="10:00 AM - 1:00 PM" /></label>
+          </div>
+          <div className="form-row">
+            <label>Start time
+              <select value={startTime} onChange={(e) => handleTimeChange(e.target.value, endTime)}>
+                {timeSlots.map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </label>
+            <label>End time
+              <select value={endTime} onChange={(e) => handleTimeChange(startTime, e.target.value)}>
+                {timeSlots.map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </label>
           </div>
           <div className="form-row">
             <label>Venue<input required value={form.venue} onChange={(e) => setForm({ ...form, venue: e.target.value })} placeholder="Venue name" /></label>
