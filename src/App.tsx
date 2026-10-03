@@ -891,7 +891,7 @@ function LoginPage({ onLogin, go }: { onLogin: (isNewUser?: boolean) => void; go
 
   return (
     <section className="auth-page">
-      <div className="auth-visual" style={{ backgroundImage: `linear-gradient(180deg, rgba(67,56,202,.35), rgba(124,58,237,.75)), url("${heroImage}")` }}>
+      <div className="auth-visual" style={{ backgroundImage: `linear-gradient(180deg, rgba(14,13,11,.3), rgba(14,13,11,.85)), url("${heroImage}")` }}>
         <div className="auth-visual-brand">
           <img src={logoImg} alt="EventKalam" className="brand-logo" />
           <span>EventKalam</span>
@@ -972,7 +972,7 @@ function ResetPasswordPage({ go, setToast }: { go: (view: View) => void; setToas
   if (success) {
     return (
       <section className="auth-page">
-        <div className="auth-visual" style={{ backgroundImage: `linear-gradient(180deg, rgba(67,56,202,.35), rgba(124,58,237,.75)), url("${heroImage}")` }}>
+        <div className="auth-visual" style={{ backgroundImage: `linear-gradient(180deg, rgba(14,13,11,.3), rgba(14,13,11,.85)), url("${heroImage}")` }}>
           <div className="auth-visual-brand"><img src={logoImg} alt="EventKalam" className="brand-logo" /><span>EventKalam</span></div>
           <div><p className="eyebrow">A better place to begin</p><h1>There's more waiting for you.</h1><p>Keep your events, ideas and new beginnings in one place.</p></div>
         </div>
@@ -991,7 +991,7 @@ function ResetPasswordPage({ go, setToast }: { go: (view: View) => void; setToas
 
   return (
     <section className="auth-page">
-      <div className="auth-visual" style={{ backgroundImage: `linear-gradient(180deg, rgba(67,56,202,.35), rgba(124,58,237,.75)), url("${heroImage}")` }}>
+      <div className="auth-visual" style={{ backgroundImage: `linear-gradient(180deg, rgba(14,13,11,.3), rgba(14,13,11,.85)), url("${heroImage}")` }}>
         <div className="auth-visual-brand"><img src={logoImg} alt="EventKalam" className="brand-logo" /><span>EventKalam</span></div>
         <div><p className="eyebrow">A better place to begin</p><h1>There's more waiting for you.</h1><p>Keep your events, ideas and new beginnings in one place.</p></div>
       </div>
